@@ -1,0 +1,13 @@
+server:
+  port: "8080"
+  mode: "release"
+
+db:
+  host: "dev-db-host"
+  port: "5432"
+  user: "postgres"
+  password: "dev_password" # In real life, inject via ENV vars
+  name: "woorung_dev"
+
+jwt:
+  secret: "dev_secret_key"

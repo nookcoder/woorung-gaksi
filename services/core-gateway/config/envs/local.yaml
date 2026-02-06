@@ -1,0 +1,13 @@
+server:
+  port: "8080"
+  mode: "debug"
+
+db:
+  host: "localhost"
+  port: "5432"
+  user: "postgres"
+  password: "password"
+  name: "woorung_local"
+
+jwt:
+  secret: "local_secret_key"

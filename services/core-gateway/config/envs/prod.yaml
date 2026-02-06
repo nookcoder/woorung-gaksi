@@ -1,0 +1,13 @@
+server:
+  port: "8080"
+  mode: "release"
+
+db:
+  host: "prod-db-host"
+  port: "5432"
+  user: "postgres"
+  password: "prod_password"
+  name: "woorung_prod"
+
+jwt:
+  secret: "prod_secret_key"
