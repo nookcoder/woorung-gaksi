@@ -23,6 +23,9 @@ type Config struct {
 	JWT struct {
 		Secret string `yaml:"secret"`
 	} `yaml:"jwt"`
+	Telegram struct {
+		Token string `yaml:"token"`
+	} `yaml:"telegram"`
 }
 
 func Load(env string) (*Config, error) {

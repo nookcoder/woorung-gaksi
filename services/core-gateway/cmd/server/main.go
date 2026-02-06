@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/nookcoder/woorung-gaksi/services/core-gateway/config"
 	"github.com/nookcoder/woorung-gaksi/services/core-gateway/internal/auth"
+	"github.com/nookcoder/woorung-gaksi/services/core-gateway/internal/chat"
 	"github.com/nookcoder/woorung-gaksi/services/core-gateway/internal/health"
 	"github.com/nookcoder/woorung-gaksi/services/core-gateway/internal/middleware"
 )
@@ -30,6 +31,19 @@ func main() {
 	// 2. Services & Middleware
 	jwtService := auth.NewJWTService(cfg.JWT.Secret, 24*time.Hour)
 	authMiddleware := middleware.AuthMiddleware(jwtService)
+
+	// 2.1 Telegram Bot (Optional)
+	if cfg.Telegram.Token != "" {
+		botService, err := chat.NewBotService(cfg.Telegram.Token, cfg.Server.Mode == "debug")
+		if err != nil {
+			log.Printf("Failed to init Telegram Bot: %v", err)
+		} else {
+			chatHandler := chat.NewHandler(botService)
+			chatHandler.StartPolling()
+		}
+	} else {
+		log.Println("Telegram Token not found, skipping bot init.")
+	}
 
 	// 3. Handlers
 	healthHandler := health.NewHealthHandler()

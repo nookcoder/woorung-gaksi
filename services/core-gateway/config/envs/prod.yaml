@@ -11,3 +11,6 @@ db:
 
 jwt:
   secret: "prod_secret_key"
+
+telegram:
+  token: "8576656557:AAHQ9YoUeazzQFgw7u5HdSGK5RNK1THQxL4"
