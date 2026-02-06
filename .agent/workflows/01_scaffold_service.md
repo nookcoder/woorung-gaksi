@@ -1,37 +1,44 @@
 ---
-description: Scaffold a new service following DDD structure
+description: Scaffold a new service following Modular/DDD structure
 ---
 
-# Scaffold New Service (DDD)
+# Scaffold New Service (Modular DDD)
 
-This workflow guides you through creating a new service (e.g., `auth-service`, `core-api`) with the proper Domain-Driven Design directory structure.
+This workflow guides you through creating a new service using **Modular Architecture** (Package by Feature).
 
 ## 1. Create Directory Structure
 
-Ideally, replace `SERVICE_NAME` with the name of your service (e.g., `services/core-api`).
+Replace `SERVICE_NAME` (e.g., `services/core-gateway`) and `PRIMARY_DOMAIN` (e.g., `user`).
+
+### For Go:
 
 ```bash
-mkdir -p services/SERVICE_NAME/src/domain/entities
-mkdir -p services/SERVICE_NAME/src/domain/repositories
-mkdir -p services/SERVICE_NAME/src/domain/events
-mkdir -p services/SERVICE_NAME/src/application/use_cases
-mkdir -p services/SERVICE_NAME/src/application/dtos
-mkdir -p services/SERVICE_NAME/src/infrastructure/db
-mkdir -p services/SERVICE_NAME/src/infrastructure/web
-mkdir -p services/SERVICE_NAME/src/infrastructure/external
-mkdir -p services/SERVICE_NAME/tests/unit
-mkdir -p services/SERVICE_NAME/tests/integration
+# Core structure
+mkdir -p services/SERVICE_NAME/cmd/server
+mkdir -p services/SERVICE_NAME/config
+mkdir -p services/SERVICE_NAME/internal/shared
+
+# Primary Domain (e.g., internal/auth)
+mkdir -p services/SERVICE_NAME/internal/PRIMARY_DOMAIN
+# Within domain: entity, repository, service, handler are files, not folders usually, but if large:
+# mkdir -p services/SERVICE_NAME/internal/PRIMARY_DOMAIN/service
+```
+
+### For Python:
+
+```bash
+mkdir -p services/SERVICE_NAME/src/modules/PRIMARY_DOMAIN
+mkdir -p services/SERVICE_NAME/src/shared
 ```
 
 ## 2. Initialize Dependency Management
 
-Initialize `uv` or `poetry` or `go mod` depending on the language.
-(Example for Python/uv)
-
 ```bash
 cd services/SERVICE_NAME
-# uv init or similar
-echo "src/" > .sources
+# Go
+go mod init github.com/nookcoder/woorung-gaksi/services/SERVICE_NAME
+# Python
+# uv init
 ```
 
 ## 3. Create Base Files
@@ -44,9 +51,9 @@ echo "# SERVICE_NAME" > services/SERVICE_NAME/README.md
 
 ## 4. Define Initial Domain
 
-Ask the user for the primary "Aggregate Root" entity (e.g., `User` for Auth, `Job` for Core).
-Create the file in `src/domain/entities/`.
+Ask the user for the "Primary Domain" (e.g., Auth, Job).
+Create the initial files in `internal/DOMAIN/` (Go) or `src/modules/DOMAIN/` (Python).
 
-## 5. Setup CI/CD Skeleton
-
-Ensure there is a Dockerfile in `services/SERVICE_NAME/Dockerfile` optimized for the requested runtime.
+- `model.go` / `models.py` (Entity)
+- `repository.go` / `repository.py` (Interface)
+- `service_test.go` (TDD Start)
