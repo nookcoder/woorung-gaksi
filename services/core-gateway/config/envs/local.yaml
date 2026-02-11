@@ -13,4 +13,7 @@ jwt:
   secret: "local_secret_key"
 
 telegram:
-  token: "8576656557:AAHQ9YoUeazzQFgw7u5HdSGK5RNK1THQxL4"
+  token: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+
+pm_agent:
+  url: "http://localhost:8000"

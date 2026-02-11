@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -30,8 +31,12 @@ func sendRequest(message string) {
 	// TODO: Load URL from config or env
 	url := "http://localhost:8080/api/v1/ask" 
 
-	// TODO: Get Token from local storage (or pass via flag for now)
-	token := "YOUR_DEV_TOKEN" 
+	token := os.Getenv("WOORUNG_TOKEN")
+	if token == "" {
+		fmt.Println("Error: WOORUNG_TOKEN environment variable not set.")
+		fmt.Println("Tip: Check the Gateway server logs for the [DEV MODE] Access Token.")
+		return
+	}
 
 	payload := map[string]string{
 		"message": message,
@@ -41,9 +46,10 @@ func sendRequest(message string) {
 
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	req.Header.Set("Content-Type", "application/json")
-	if token != "YOUR_DEV_TOKEN" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	// Debug Info
+	// fmt.Printf("DEBUG: Sending POST to %s with Token %s...\n", url, token[:10])
 
 	client := &http.Client{}
 	resp, err := client.Do(req)

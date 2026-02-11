@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/nookcoder/woorung-gaksi/services/core-gateway/config"
+	"github.com/nookcoder/woorung-gaksi/services/core-gateway/internal/agent"
 	"github.com/nookcoder/woorung-gaksi/services/core-gateway/internal/auth"
 	"github.com/nookcoder/woorung-gaksi/services/core-gateway/internal/chat"
 	"github.com/nookcoder/woorung-gaksi/services/core-gateway/internal/health"
@@ -31,6 +32,12 @@ func main() {
 	// 2. Services & Middleware
 	jwtService := auth.NewJWTService(cfg.JWT.Secret, 24*time.Hour)
 	authMiddleware := middleware.AuthMiddleware(jwtService)
+	
+	// Dev UX: Print a valid token for testing
+	if cfg.Server.Mode == "debug" {
+		devToken, _ := jwtService.GenerateToken("dev_admin", "admin")
+		log.Printf("\n🔑 [DEV MODE] Access Token: %s\n", devToken)
+	}
 
 	// 2.1 Telegram Bot (Optional)
 	if cfg.Telegram.Token != "" {
@@ -47,6 +54,7 @@ func main() {
 
 	// 3. Handlers
 	healthHandler := health.NewHealthHandler()
+	agentHandler := agent.NewHandler(cfg.PMAgent.URL)
 
 	// 4. Routes
 	// Public
@@ -68,6 +76,7 @@ func main() {
 			role, _ := c.Get("role")
 			c.JSON(200, gin.H{"user_id": userID, "role": role})
 		})
+		api.POST("/ask", agentHandler.Ask)
 	}
 
 	// 4. Run

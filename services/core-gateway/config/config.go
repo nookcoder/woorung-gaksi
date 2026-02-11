@@ -26,6 +26,9 @@ type Config struct {
 	Telegram struct {
 		Token string `yaml:"token"`
 	} `yaml:"telegram"`
+	PMAgent struct {
+		URL string `yaml:"url"`
+	} `yaml:"pm_agent"`
 }
 
 func Load(env string) (*Config, error) {
