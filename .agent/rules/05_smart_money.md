@@ -23,3 +23,8 @@ description: "Alpha-K 프로젝트 요구사항 명세서"를 바탕으로 구�
 ## 3. Continuous Accumulation
 
 - **Logic:** 최근 5거래일 중 기관(Institutional) 또는 외국인(Foreign) 순매수가 3일 이상 발생.
+
+## Implementation Notes
+
+- **Data Source:** KIS Open API `FHKST01010900` (주식현재가 투자자) → 최근 30거래일 외인/기관/개인 순매수 데이터 제공.
+- **Program Trading:** KIS Open API `FHKST01010200` (주식현재가 회원사) → 프로그램 비차익/차익 매매 확인 가능.

@@ -189,19 +189,14 @@ def deep_dive_node(state: AlphaKState) -> Dict:
             }
             print(f"    [Tech] Score={tech.score:.0f} VCP={'✅' if tech.vcp.detected else '❌'} OB={len(tech.order_blocks)}")
 
-            # 3B. Fundamental (Mock financials - 실제로는 DART 연동)
-            financials_mock = {
-                "roa": 0.08, "roa_prev": 0.06,
-                "operating_cash_flow": 5000, "net_income": 4000,
-                "long_term_debt": 2000, "long_term_debt_prev": 2500,
-                "current_ratio": 1.8, "current_ratio_prev": 1.6,
-                "shares_outstanding": 10000, "shares_outstanding_prev": 10000,
-                "gross_margin": 0.35, "gross_margin_prev": 0.32,
-                "asset_turnover": 0.9, "asset_turnover_prev": 0.85,
-                "per": 12.0, "peg_ratio": 1.2,
-                "cb_overhang_pct": 0,
-            }
-            fund = fundamental_agent.analyze(ticker, financials_mock, sector_avg_per=15.0)
+            # 3B. Fundamental (KIS API)
+            stock_info = data_provider.get_stock_info(ticker)
+            kis_financials = data_provider.get_financial_statements(ticker)
+            
+            # KIS 데이터를 FundamentalAgent 포맷으로 변환
+            financials = _map_kis_to_fundamental(stock_info, kis_financials)
+            
+            fund = fundamental_agent.analyze(ticker, financials, sector_avg_per=15.0)
             fund_results[ticker] = {
                 "f_score": fund.f_score,
                 "verdict": fund.verdict.value,
@@ -518,6 +513,60 @@ def build_graph() -> StateGraph:
 
     return builder
 
+
+# ═══════════════════════════════════════════════════════════════════
+# Helpers
+# ═══════════════════════════════════════════════════════════════════
+
+def _map_kis_to_fundamental(stock_info: Dict, kis_fin: Dict) -> Dict:
+    """
+    KIS API 데이터를 FundamentalAgent가 사용하는 포맷으로 매핑.
+    KIS의 'output'은 보통 리스트 형태이며, 최신(0), 전년(1) 순서임.
+    """
+    f = {
+        "per": stock_info.get("per", 0),
+        "peg_ratio": 1.2, # KIS에서 직접 제공하지 않을 경우 디폴트
+        "cb_overhang_pct": 0,
+    }
+
+    # KIS 재무표 (FHKST03020800) parsing
+    # 실제 API 리스폰스 구조에 따라 r[0] (최신), r[1] (이전) 접근
+    if isinstance(kis_fin, list) and len(kis_fin) >= 2:
+        curr = kis_fin[0]
+        prev = kis_fin[1]
+        
+        def to_f(val):
+            try: return float(val.replace(',', '')) if isinstance(val, str) else float(val or 0)
+            except: return 0.0
+
+        # ROA = Net Income / Total Assets
+        curr_assets = to_f(curr.get("total_assets"))
+        prev_assets = to_f(prev.get("total_assets"))
+        curr_ni = to_f(curr.get("net_income"))
+        prev_ni = to_f(prev.get("net_income"))
+        
+        f["roa"] = curr_ni / curr_assets if curr_assets > 0 else 0
+        f["roa_prev"] = prev_ni / prev_assets if prev_assets > 0 else 0
+        f["net_income"] = curr_ni
+        f["operating_cash_flow"] = to_f(curr.get("operating_cash_flow")) # KIS 필드명 확인 필요
+        
+        # Debt Ratio / Current Ratio
+        f["long_term_debt"] = to_f(curr.get("total_liabilities")) # Proxy if specific LT debt missing
+        f["long_term_debt_prev"] = to_f(prev.get("total_liabilities"))
+        
+        f["current_ratio"] = to_f(curr.get("current_ratio")) # KIS 제공시
+        f["current_ratio_prev"] = to_f(prev.get("current_ratio"))
+        
+        f["shares_outstanding"] = to_f(curr.get("total_stock_cnt"))
+        f["shares_outstanding_prev"] = to_f(prev.get("total_stock_cnt"))
+        
+        f["gross_margin"] = to_f(curr.get("gross_profit_margin"))
+        f["gross_margin_prev"] = to_f(prev.get("gross_profit_margin"))
+        
+        f["asset_turnover"] = to_f(curr.get("total_asset_turnover_ratio"))
+        f["asset_turnover_prev"] = to_f(prev.get("total_asset_turnover_ratio"))
+
+    return f
 
 # Pre-compiled graph
 graph = build_graph().compile()

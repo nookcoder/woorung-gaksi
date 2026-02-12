@@ -34,3 +34,10 @@ description: "Alpha-K 프로젝트 요구사항 명세서"를 바탕으로 구�
 - **Metric:** 20-Day Pearson Correlation Coefficient.
 - **Condition:**
   - IF Correlation > 0.2 (Positive Correlation): Market is decoupling. Reduce Bet Size by 50%.
+
+## Implementation Notes
+
+- **ADR:** FinanceDataReader `StockListing('KOSPI')` → 당일 전 종목 등락률 스냅샷 기반 계산.
+- **V-KOSPI:** FinanceDataReader `DataReader('VKOSPI')` → KOSPI 200 변동성 지수.
+- **환율:** FinanceDataReader `DataReader('USD/KRW')` → USD/KRW 환율.
+- **KOSPI Index:** FinanceDataReader `DataReader('KS11')` → KOSPI 지수 종가.

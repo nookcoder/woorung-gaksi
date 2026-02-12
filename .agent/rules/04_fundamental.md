@@ -33,3 +33,9 @@ description: "Alpha-K 프로젝트 요구사항 명세서"를 바탕으로 구�
 - **Action:** OpenDART API를 통해 최근 6개월 공시 검색.
 - **Blacklist Keywords:** "불성실공시법인", "관리종목지정", "횡령", "배임", "감사의견 거절/한정".
 - **Overhang Check:** 전환사채(CB) 잔액이 시가총액의 5% 이상인 경우 경고(Warning).
+
+## Implementation Notes
+
+- **PER/PBR/EPS:** KIS Open API `FHKST01010100` (주식현재가 시세) → 실시간 기본 지표.
+- **시가총액/거래대금:** KIS Open API `FHKST01010100` → `hts_avls`, `acml_tr_pbmn`.
+- **DART 공시:** OpenDART API (선택) → 불성실공시 / CB overhang 체크.

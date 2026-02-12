@@ -62,16 +62,9 @@ class MacroAgent:
     def _calculate_adr(self, start: str, end: str) -> float:
         """
         ADR (Advance-Decline Ratio).
-        1차: get_advancing_declining_history로 20일 이평.
-        2차 (fallback): 오늘 스냅샷만 사용.
+        FDR StockListing 스냅샷 기반 (오늘 기준).
         """
         try:
-            # 1차: 20일 히스토리
-            adr_hist = self.data.get_advancing_declining_history(days=25, market="KOSPI")
-            if not adr_hist.empty and len(adr_hist) >= 20:
-                return float(adr_hist['adr'].tail(20).mean())
-
-            # 2차: 오늘 스냅샷만 사용
             adv, dec = self.data.get_advancing_declining(market="KOSPI")
             if dec > 0:
                 return (adv / dec) * 100

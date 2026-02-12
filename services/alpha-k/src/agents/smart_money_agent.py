@@ -3,6 +3,8 @@ Alpha-K Agent: Smart Money Flow (Phase 3C)
 ============================================
 rules/05_smart_money.md 구현체.
 프로그램 비차익 순매수, 거래원 분석, 연속 매집 판단.
+
+데이터 소스: KIS Open API (투자자별 매매동향)
 """
 import pandas as pd
 import numpy as np
@@ -29,12 +31,8 @@ class SmartMoneyAgent:
 
     def analyze(self, ticker: str) -> SmartMoneyResult:
         """수급 분석을 수행한다."""
-        end = datetime.now()
-        start = end - timedelta(days=30)
-        start_str = start.strftime("%Y-%m-%d")
-        end_str = end.strftime("%Y-%m-%d")
-
-        inv_df = self.data.get_investor_trading_value(ticker, start_str, end_str)
+        # KIS API에서 투자자별 매매동향 조회 (최근 ~30거래일)
+        inv_df = self.data.get_investor_trading(ticker)
 
         if inv_df.empty:
             logger.warning(f"[SmartMoneyAgent] No investor data for {ticker}")
@@ -49,10 +47,10 @@ class SmartMoneyAgent:
         # ─── 3. 연속 매집 ───
         accum_days = self._check_continuous_accumulation(inv_df)
 
-        # 순매수 금액 (최근 5일 합계)
+        # 순매수 금액 (최근 5일 합계, 백만원 단위)
         recent = inv_df.tail(5)
-        net_foreign = float(recent['foreigner'].sum()) if 'foreigner' in recent.columns else 0
-        net_inst = float(recent['institution'].sum()) if 'institution' in recent.columns else 0
+        net_foreign = float(recent['foreigner_net_amt'].sum()) if 'foreigner_net_amt' in recent.columns else 0
+        net_inst = float(recent['institution_net_amt'].sum()) if 'institution_net_amt' in recent.columns else 0
 
         # ─── Flow Score 판정 ───
         flow_score = self._determine_flow_score(
@@ -72,22 +70,21 @@ class SmartMoneyAgent:
     def _check_program_buying(self, inv_df: pd.DataFrame) -> bool:
         """
         프로그램 비차익 순매수 확인.
-        실제로는 프로그램 매매 세부 데이터가 필요하나,
-        여기서는 기관 순매수 누적 그래프의 기울기(Slope)로 대체.
-        기울기 > 0이면 Positive Signal.
+        기관 순매수 누적 그래프의 기울기(Slope) > 0이면 Positive.
+        (실제로는 KIS 프로그램매매 API로 보강 가능)
         """
         try:
-            if 'institution' not in inv_df.columns:
+            col = 'institution_net_qty' if 'institution_net_qty' in inv_df.columns else 'institution_net_amt'
+            if col not in inv_df.columns:
                 return False
 
-            cumulative = inv_df['institution'].cumsum()
+            cumulative = inv_df[col].cumsum()
             if len(cumulative) < 5:
                 return False
 
-            # 최근 10일 기관 누적 기울기
             recent_cum = cumulative.tail(10).values
             x = np.arange(len(recent_cum))
-            
+
             if len(x) < 2:
                 return False
 
@@ -106,17 +103,17 @@ class SmartMoneyAgent:
         try:
             recent = inv_df.tail(5)
 
-            foreign_buy = 0
-            inst_buy = 0
-            individual_buy = 0
+            # KIS API 컬럼: foreigner_net_qty, institution_net_qty, individual_net_qty
+            fgn_col = 'foreigner_net_qty' if 'foreigner_net_qty' in recent.columns else 'foreigner_net_amt'
+            inst_col = 'institution_net_qty' if 'institution_net_qty' in recent.columns else 'institution_net_amt'
+            ind_col = 'individual_net_qty' if 'individual_net_qty' in recent.columns else 'individual_net_amt'
 
-            if 'foreigner' in recent.columns:
-                # 순매수가 양수인 날의 합계
-                foreign_buy = recent['foreigner'][recent['foreigner'] > 0].sum()
-            if 'institution' in recent.columns:
-                inst_buy = recent['institution'][recent['institution'] > 0].sum()
-            if 'individual' in recent.columns:
-                individual_buy = abs(recent['individual'][recent['individual'] > 0].sum())
+            if fgn_col not in recent.columns:
+                return False
+
+            foreign_buy = recent[fgn_col][recent[fgn_col] > 0].sum() if fgn_col in recent.columns else 0
+            inst_buy = recent[inst_col][recent[inst_col] > 0].sum() if inst_col in recent.columns else 0
+            individual_buy = abs(recent[ind_col][recent[ind_col] > 0].sum()) if ind_col in recent.columns else 0
 
             if individual_buy == 0:
                 return (foreign_buy + inst_buy) > 0
@@ -136,9 +133,12 @@ class SmartMoneyAgent:
             recent = inv_df.tail(5)
             count = 0
 
+            fgn_col = 'foreigner_net_qty' if 'foreigner_net_qty' in recent.columns else 'foreigner_net_amt'
+            inst_col = 'institution_net_qty' if 'institution_net_qty' in recent.columns else 'institution_net_amt'
+
             for _, row in recent.iterrows():
-                inst = row.get('institution', 0)
-                foreign = row.get('foreigner', 0)
+                inst = row.get(inst_col, 0)
+                foreign = row.get(fgn_col, 0)
                 if inst > 0 or foreign > 0:
                     count += 1
 

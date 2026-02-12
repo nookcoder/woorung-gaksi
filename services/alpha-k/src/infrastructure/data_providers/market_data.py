@@ -1,27 +1,35 @@
 """
 Alpha-K Infrastructure: Market Data Provider
 =============================================
-FinanceDataReader + pykrx를 래핑하여 에이전트에 데이터를 공급한다.
+KIS Open API + FinanceDataReader 통합 데이터 제공.
+
+우선순위:
+  1차. KIS API (투자자 수급, PER/PBR, 업종 시세)
+  2차. FinanceDataReader (OHLCV, 지수, 환율, ADR)
 """
 import pandas as pd
 import numpy as np
 import FinanceDataReader as fdr
-from pykrx import stock
 from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
 import logging
+
+from .kis_client import KISClient
 
 logger = logging.getLogger(__name__)
 
 
 class MarketDataProvider:
-    """주가, 지수, 환율 데이터를 통합 제공한다."""
+    """주가, 지수, 환율, 수급 데이터를 통합 제공한다."""
 
-    # ───── Price Data (FinanceDataReader) ─────
+    def __init__(self, kis_client: KISClient = None):
+        self.kis = kis_client or KISClient()
+
+    # ───── Price Data (FDR Primary / KIS Fallback) ─────
 
     @staticmethod
     def get_ohlcv(ticker: str, start: str, end: str) -> pd.DataFrame:
-        """종목 OHLCV 데이터를 가져온다."""
+        """종목 OHLCV. FDR 우선 (장기 과거 데이터에 강함)."""
         try:
             df = fdr.DataReader(ticker, start, end)
             if df.empty:
@@ -33,7 +41,7 @@ class MarketDataProvider:
 
     @staticmethod
     def get_index(index_code: str, start: str, end: str) -> pd.DataFrame:
-        """지수 데이터 (KOSPI, KOSDAQ 등) - FDR 사용"""
+        """지수 데이터 (KS11, KQ11 등) — FDR 사용."""
         try:
             return fdr.DataReader(index_code, start, end)
         except Exception as e:
@@ -41,250 +49,158 @@ class MarketDataProvider:
             return pd.DataFrame()
 
     @staticmethod
-    def get_vkospi(start: str, end: str) -> pd.DataFrame:
-        """
-        V-KOSPI (KOSPI 200 변동성 지수).
-        1차: pykrx의 get_index_ohlcv_by_date (코드: 1004)
-        2차 (fallback): FDR DataReader
-        """
-        try:
-            start_fmt = start.replace("-", "")
-            end_fmt = end.replace("-", "")
-            df = stock.get_index_ohlcv_by_date(start_fmt, end_fmt, "1004")
-            if not df.empty:
-                rename_map = {}
-                for col in df.columns:
-                    if '종가' in str(col):
-                        rename_map[col] = 'Close'
-                    elif '시가' in str(col):
-                        rename_map[col] = 'Open'
-                    elif '고가' in str(col):
-                        rename_map[col] = 'High'
-                    elif '저가' in str(col):
-                        rename_map[col] = 'Low'
-                    elif '거래량' in str(col):
-                        rename_map[col] = 'Volume'
-                if rename_map:
-                    df = df.rename(columns=rename_map)
-                return df
-        except Exception as e:
-            logger.warning(f"[MarketData] pykrx V-KOSPI failed: {e}")
-
-        # Fallback: FDR
-        try:
-            df = fdr.DataReader("VKOSPI", start, end)
-            return df
-        except Exception as e:
-            logger.error(f"[MarketData] V-KOSPI fetch failed (all sources): {e}")
-            return pd.DataFrame()
-
-    @staticmethod
     def get_usd_krw(start: str, end: str) -> pd.DataFrame:
-        """USD/KRW 환율 데이터"""
+        """USD/KRW 환율 데이터."""
         try:
             return fdr.DataReader("USD/KRW", start, end)
         except Exception as e:
             logger.error(f"[MarketData] USD/KRW fetch failed: {e}")
             return pd.DataFrame()
 
-    # ───── Market Breadth ─────
+    # ───── V-KOSPI (FDR) ─────
 
     @staticmethod
-    def get_advancing_declining(date: str = None, market: str = "KOSPI") -> Tuple[int, int]:
-        """
-        상승/하락 종목 수를 반환한다. ADR 계산용.
+    def get_vkospi(start: str, end: str) -> pd.DataFrame:
+        """V-KOSPI (KOSPI 200 변동성 지수). FDR DataReader 사용."""
+        try:
+            df = fdr.DataReader("VKOSPI", start, end)
+            return df
+        except Exception as e:
+            logger.warning(f"[MarketData] V-KOSPI fetch failed: {e}")
+            return pd.DataFrame()
 
-        1차: fdr.StockListing (오늘 기준 스냅샷)
-        2차: pykrx get_market_ohlcv_by_ticker
+    # ───── Market Breadth (ADR) ─────
+
+    @staticmethod
+    def get_advancing_declining(market: str = "KOSPI") -> Tuple[int, int]:
         """
-        # Method 1: FDR StockListing (가장 안정적, 오늘 기준만)
+        상승/하락 종목 수 반환. ADR 계산용.
+        FDR StockListing 사용 (오늘 기준 스냅샷).
+        """
         try:
             df = fdr.StockListing(market)
-            if not df.empty:
-                if 'ChagesRatio' in df.columns:
-                    changes = df['ChagesRatio']
-                elif 'Changes' in df.columns:
-                    changes = df['Changes']
-                elif 'Close' in df.columns and 'Open' in df.columns:
-                    changes = df['Close'] - df['Open']
-                else:
-                    return 0, 0
+            if df.empty:
+                return 0, 0
 
-                advancing = int((changes > 0).sum())
-                declining = int((changes < 0).sum())
-                return advancing, declining
-        except Exception as e:
-            logger.warning(f"[MarketData] FDR StockListing ADR failed: {e}")
-
-        # Method 2: pykrx fallback (과거 날짜용)
-        try:
-            if date:
-                date_fmt = date.replace("-", "")
+            if 'ChagesRatio' in df.columns:
+                changes = df['ChagesRatio']
+            elif 'Changes' in df.columns:
+                changes = df['Changes']
+            elif 'Close' in df.columns and 'Open' in df.columns:
+                changes = df['Close'] - df['Open']
             else:
-                date_fmt = datetime.now().strftime("%Y%m%d")
+                return 0, 0
 
-            df = stock.get_market_ohlcv_by_ticker(date_fmt, market=market)
-            if not df.empty:
-                if '등락률' in df.columns:
-                    changes = df['등락률']
-                else:
-                    return 0, 0
-                advancing = int((changes > 0).sum())
-                declining = int((changes < 0).sum())
-                return advancing, declining
+            advancing = int((changes > 0).sum())
+            declining = int((changes < 0).sum())
+            return advancing, declining
         except Exception as e:
-            logger.warning(f"[MarketData] pykrx ADR fallback failed: {e}")
+            logger.warning(f"[MarketData] ADR StockListing failed: {e}")
+            return 0, 0
 
-        return 0, 0
+    # ───── Investor / Smart Money (KIS API) ─────
 
-    @staticmethod
-    def get_advancing_declining_history(days: int = 30, market: str = "KOSPI") -> pd.DataFrame:
+    def get_investor_trading(self, ticker: str) -> pd.DataFrame:
         """
-        n일간의 ADR 히스토리를 반환한다.
-        KOSPI 지수 구성 종목의 일별 등락률로부터 계산.
-        pykrx를 사용할 수 없는 경우 FDR StockListing 스냅샷을 반환.
+        종목별 투자자 매매동향 (외국인/기관/개인).
+        KIS API [FHKST01010900] 사용.
         """
-        try:
-            end = datetime.now()
-            start = end - timedelta(days=days * 2)  # 여유 있게 과거 데이터 확보
-
-            # KOSPI 지수 데이터로 거래일 목록 확보
-            kospi_df = fdr.DataReader("KS11", start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
-            if kospi_df.empty or len(kospi_df) < days:
-                return pd.DataFrame()
-
-            trading_dates = kospi_df.index[-days:]
-            records = []
-            for dt in trading_dates:
-                date_str = dt.strftime("%Y%m%d")
-                try:
-                    df = stock.get_market_ohlcv_by_ticker(date_str, market=market)
-                    if not df.empty and '등락률' in df.columns:
-                        adv = int((df['등락률'] > 0).sum())
-                        dec = int((df['등락률'] < 0).sum())
-                        adr = (adv / max(dec, 1)) * 100
-                        records.append({"date": dt, "advancing": adv, "declining": dec, "adr": adr})
-                except Exception:
-                    continue
-
-            if records:
-                return pd.DataFrame(records).set_index("date")
+        if not self.kis.is_configured:
+            logger.warning("[MarketData] KIS API key not configured → no investor data")
             return pd.DataFrame()
 
+        try:
+            return self.kis.get_investor_trading(ticker)
         except Exception as e:
-            logger.error(f"[MarketData] ADR history failed: {e}")
+            logger.error(f"[MarketData] Investor trading failed for {ticker}: {e}")
             return pd.DataFrame()
 
-    # ───── Sector Data (pykrx) ─────
-
-    @staticmethod
-    def get_sector_list(market: str = "KOSPI") -> pd.DataFrame:
-        """업종(섹터) 목록을 가져온다."""
+    def get_program_trading(self, ticker: str) -> dict:
+        """프로그램 매매 (비차익/차익). KIS API [FHKST01010200]."""
+        if not self.kis.is_configured:
+            return {}
         try:
-            date = datetime.now().strftime("%Y%m%d")
-            return stock.get_index_ticker_list(date, market)
+            return self.kis.get_program_trading(ticker)
         except Exception as e:
-            logger.error(f"[MarketData] Sector list failed: {e}")
+            logger.error(f"[MarketData] Program trading failed for {ticker}: {e}")
+            return {}
+
+    # ───── Sector Data (KIS API / FDR Fallback) ─────
+
+    def get_sector_daily(
+        self, sector_code: str, start: str, end: str
+    ) -> pd.DataFrame:
+        """
+        업종 기간별 시세. KIS API [FHKUP03500100] 사용.
+        KIS 미설정 시 FDR fallback.
+        """
+        if self.kis.is_configured:
+            try:
+                df = self.kis.get_sector_daily(sector_code, start, end)
+                if not df.empty:
+                    return df
+            except Exception as e:
+                logger.warning(f"[MarketData] KIS sector daily failed: {e}")
+
+        # FDR fallback (KRX 업종코드 → FDR에서는 지원 제한적)
+        try:
+            df = fdr.DataReader(sector_code, start, end)
+            return df
+        except Exception:
             return pd.DataFrame()
 
-    @staticmethod
-    def get_sector_ohlcv(sector_code: str, start: str, end: str) -> pd.DataFrame:
-        """특정 업종 지수 OHLCV"""
+    def get_sector_index(self, sector_code: str) -> dict:
+        """업종 현재 지수. KIS API."""
+        if not self.kis.is_configured:
+            return {}
         try:
-            start_fmt = start.replace("-", "")
-            end_fmt = end.replace("-", "")
-            return stock.get_index_ohlcv_by_date(start_fmt, end_fmt, sector_code)
+            return self.kis.get_sector_index(sector_code)
         except Exception as e:
-            logger.error(f"[MarketData] Sector OHLCV failed for {sector_code}: {e}")
-            return pd.DataFrame()
+            logger.error(f"[MarketData] Sector index failed: {e}")
+            return {}
 
-    @staticmethod
-    def get_sector_tickers(sector_code: str, date: str = None) -> List[str]:
-        """특정 업종에 속한 종목 코드 목록"""
+    def get_sector_tickers(self, sector_code: str) -> List[str]:
+        """업종별 종목 리스트. KIS API."""
+        if not self.kis.is_configured:
+            return []
         try:
-            if date is None:
-                date = datetime.now().strftime("%Y%m%d")
-            else:
-                date = date.replace("-", "")
-            return stock.get_index_portfolio_deposit_file(sector_code, date)
+            return self.kis.get_sector_tickers(sector_code)
         except Exception as e:
             logger.error(f"[MarketData] Sector tickers failed for {sector_code}: {e}")
             return []
 
-    # ───── Investor/Supply-Demand Data (pykrx) ─────
+    # ───── Fundamental (KIS API) ─────
 
-    @staticmethod
-    def get_investor_trading_value(ticker: str, start: str, end: str) -> pd.DataFrame:
+    def get_stock_info(self, ticker: str) -> dict:
         """
-        투자자별 거래대금 (기관, 외국인, 개인).
-        pykrx의 get_market_trading_value_by_date 사용.
+        종목 기본 정보 (PER, PBR, EPS, 시총, 거래대금 등).
+        KIS API [FHKST01010100] 사용.
         """
+        if not self.kis.is_configured:
+            logger.warning("[MarketData] KIS API key not configured → no stock info")
+            return {}
+
         try:
-            start_fmt = start.replace("-", "")
-            end_fmt = end.replace("-", "")
-            df = stock.get_market_trading_value_by_date(start_fmt, end_fmt, ticker)
-            if not df.empty:
-                col_map = {}
-                for col in df.columns:
-                    col_str = str(col)
-                    if '기관' in col_str and '합계' in col_str:
-                        col_map[col] = 'institution'
-                    elif '기타법인' in col_str:
-                        col_map[col] = 'corp_other'
-                    elif '개인' in col_str:
-                        col_map[col] = 'individual'
-                    elif '외국인' in col_str and '합계' in col_str:
-                        col_map[col] = 'foreigner'
-                    elif '전체' in col_str:
-                        col_map[col] = 'total'
-                if col_map:
-                    df = df.rename(columns=col_map)
-            return df
+            return self.kis.get_stock_info(ticker)
         except Exception as e:
-            logger.error(f"[MarketData] Investor data failed for {ticker}: {e}")
-            return pd.DataFrame()
+            logger.error(f"[MarketData] Stock info failed for {ticker}: {e}")
+            return {}
+
+    def get_financial_statements(self, ticker: str) -> dict:
+        """재무제표 요약. KIS API."""
+        if not self.kis.is_configured:
+            return {}
+        try:
+            return self.kis.get_financial_statements(ticker)
+        except Exception as e:
+            logger.error(f"[MarketData] Financial statements failed for {ticker}: {e}")
+            return {}
 
     @staticmethod
-    def get_market_cap(ticker: str, date: str = None) -> int:
-        """종목 시가총액 (원)"""
+    def get_stock_listing(market: str = "KOSPI") -> pd.DataFrame:
+        """전 종목 스냅샷. FDR StockListing 사용."""
         try:
-            if date is None:
-                date = datetime.now().strftime("%Y%m%d")
-            else:
-                date = date.replace("-", "")
-            df = stock.get_market_cap_by_date(date, date, ticker)
-            if not df.empty and '시가총액' in df.columns:
-                return int(df['시가총액'].iloc[-1])
-            return 0
+            return fdr.StockListing(market)
         except Exception as e:
-            logger.error(f"[MarketData] Market cap failed for {ticker}: {e}")
-            return 0
-
-    @staticmethod
-    def get_trading_value(ticker: str, date: str = None) -> int:
-        """종목 거래대금 (원)"""
-        try:
-            if date is None:
-                date = datetime.now().strftime("%Y%m%d")
-            else:
-                date = date.replace("-", "")
-            df = stock.get_market_cap_by_date(date, date, ticker)
-            if not df.empty and '거래대금' in df.columns:
-                return int(df['거래대금'].iloc[-1])
-            return 0
-        except Exception as e:
-            logger.error(f"[MarketData] Trading value failed for {ticker}: {e}")
-            return 0
-
-    # ───── Fundamental Data (pykrx) ─────
-
-    @staticmethod
-    def get_fundamental(ticker: str, start: str, end: str) -> pd.DataFrame:
-        """PER, PBR, EPS, BPS 등 기본 밸류에이션 지표"""
-        try:
-            start_fmt = start.replace("-", "")
-            end_fmt = end.replace("-", "")
-            return stock.get_market_fundamental_by_date(start_fmt, end_fmt, ticker)
-        except Exception as e:
-            logger.error(f"[MarketData] Fundamental failed for {ticker}: {e}")
+            logger.error(f"[MarketData] StockListing failed: {e}")
             return pd.DataFrame()

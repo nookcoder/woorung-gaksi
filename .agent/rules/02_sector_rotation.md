@@ -24,3 +24,10 @@ description: "Alpha-K 프로젝트 요구사항 명세서"를 바탕으로 구�
   1. 섹터 시총 상위 3개 종목(Large Cap)이 모두 20일 이평선 위에 위치.
   2. 섹터 지수 거래량이 전주 대비 20% 이상 증가.
   - **Action:** 위 조건 만족 시, 해당 섹터 내 '중소형주(Small Cap)' 중 첫 번째 상승 파동이 나오는 종목을 최우선으로 선정한다.
+
+## Implementation Notes
+
+- **업종 시세:** KIS Open API `FHKUP03500100` (업종 기간별 시세) → 업종 지수 OHLCV.
+- **업종 현재가:** KIS Open API `FHPUP02100000` (업종 현재 지수).
+- **종목 스크리닝:** FinanceDataReader `StockListing` → 시총, 거래대금 필터.
+- **OHLCV:** FinanceDataReader `DataReader(ticker)` → 60MA 필터용.
