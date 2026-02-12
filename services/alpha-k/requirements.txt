@@ -1,0 +1,10 @@
+# Alpha-K Dependencies
+pandas>=2.0.0,<3.0.0
+numpy>=1.24.0
+finance-datareader>=0.9.50
+pykrx>=1.0.44
+pandas_ta>=0.3.14
+langgraph>=0.0.30
+python-dotenv>=1.0.0
+requests>=2.31.0
+setuptools<81
