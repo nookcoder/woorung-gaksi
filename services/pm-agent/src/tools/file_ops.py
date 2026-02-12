@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Annotated
 
 # Safety: Prevent operations outside the allowed base directory
-PROJECT_ROOT = Path(os.getcwd()).resolve().parent.parent if "services" in os.getcwd() else Path(os.getcwd()).resolve()
+PROJECT_ROOT = Path(os.getenv("PROJECT_ROOT")).resolve() if os.getenv("PROJECT_ROOT") else (Path(os.getcwd()).resolve().parent.parent if "services" in os.getcwd() else Path(os.getcwd()).resolve())
 
 def _is_safe_path(path: str) -> bool:
     try:

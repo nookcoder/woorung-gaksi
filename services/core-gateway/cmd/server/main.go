@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"strconv"
 
 	"time"
 
@@ -10,9 +11,10 @@ import (
 	"github.com/nookcoder/woorung-gaksi/services/core-gateway/config"
 	"github.com/nookcoder/woorung-gaksi/services/core-gateway/internal/agent"
 	"github.com/nookcoder/woorung-gaksi/services/core-gateway/internal/auth"
-	"github.com/nookcoder/woorung-gaksi/services/core-gateway/internal/chat"
 	"github.com/nookcoder/woorung-gaksi/services/core-gateway/internal/health"
+	"github.com/nookcoder/woorung-gaksi/services/core-gateway/internal/infrastructure/database"
 	"github.com/nookcoder/woorung-gaksi/services/core-gateway/internal/middleware"
+	"github.com/nookcoder/woorung-gaksi/services/core-gateway/internal/telegram"
 )
 
 func main() {
@@ -29,6 +31,12 @@ func main() {
 	}
 	r := gin.Default()
 
+	// 1.5 Database
+	_, err = database.NewPostgresDB(*cfg)
+	if err != nil {
+		log.Printf("⚠️ Failed to connect to database: %v", err)
+	}
+
 	// 2. Services & Middleware
 	jwtService := auth.NewJWTService(cfg.JWT.Secret, 24*time.Hour)
 	authMiddleware := middleware.AuthMiddleware(jwtService)
@@ -39,24 +47,36 @@ func main() {
 		log.Printf("\n🔑 [DEV MODE] Access Token: %s\n", devToken)
 	}
 
-	// 2.1 Telegram Bot (Optional)
+	// 3. Shared Agent Service (Client)
+	agentClient := agent.NewAgentClient(cfg.PMAgent.URL)
+
+	// 3.1 Telegram Bot
 	if cfg.Telegram.Token != "" {
-		botService, err := chat.NewBotService(cfg.Telegram.Token, cfg.Server.Mode == "debug")
+		// Get Allowed Chat ID from Env for Security
+		var allowedID int64 = 0
+		if idStr := os.Getenv("TELEGRAM_ALLOWED_ID"); idStr != "" {
+			parsed, err := strconv.ParseInt(idStr, 10, 64)
+			if err == nil {
+				allowedID = parsed
+			}
+		}
+
+		bot, err := telegram.NewBot(cfg.Telegram.Token, allowedID, agentClient)
 		if err != nil {
 			log.Printf("Failed to init Telegram Bot: %v", err)
 		} else {
-			chatHandler := chat.NewHandler(botService)
-			chatHandler.StartPolling()
+			log.Println("Starting Telegram Bot...")
+			bot.Start()
 		}
 	} else {
 		log.Println("Telegram Token not found, skipping bot init.")
 	}
 
-	// 3. Handlers
+	// 4. Handlers
 	healthHandler := health.NewHealthHandler()
-	agentHandler := agent.NewHandler(cfg.PMAgent.URL)
+	agentHandler := agent.NewHandler(agentClient)
 
-	// 4. Routes
+	// 5. Routes
 	// Public
 	r.GET("/health", healthHandler.Check)
 	r.GET("/", func(c *gin.Context) {
@@ -79,7 +99,7 @@ func main() {
 		api.POST("/ask", agentHandler.Ask)
 	}
 
-	// 4. Run
+	// 6. Run
 	addr := ":" + cfg.Server.Port
 	log.Printf("Starting Core Gateway on %s (env: %s)", addr, env)
 	if err := r.Run(addr); err != nil {

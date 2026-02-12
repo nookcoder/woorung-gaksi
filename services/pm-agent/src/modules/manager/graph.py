@@ -5,8 +5,6 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from src.modules.manager.state import AgentState, Plan, Task
 from typing import Literal
-import sqlite3
-from langgraph.checkpoint.sqlite import SqliteSaver
 
 from src.shared.config import config
 from pydantic import SecretStr
@@ -317,10 +315,6 @@ workflow.add_conditional_edges(
     }
 )
 
-# Persistence Setup
-# Using SQLite for local persistence without external DB
-conn = sqlite3.connect("db/checkpoints.sqlite", check_same_thread=False)
-checkpointer = SqliteSaver(conn)
-
-# Compile with Checkpointer
-app = workflow.compile(checkpointer=checkpointer)
+# Persistence is handled by infrastructure layer now
+# Export uncompiled workflow
+agent_workflow = workflow
