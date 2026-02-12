@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 )
@@ -23,8 +24,46 @@ var askCmd = &cobra.Command{
 	},
 }
 
+// resetCmd clears the current session
+var resetCmd = &cobra.Command{
+	Use:   "reset",
+	Short: "Reset the current conversation session",
+	Run: func(cmd *cobra.Command, args []string) {
+		sessionFile := getSessionFilePath()
+		if err := os.Remove(sessionFile); err != nil && !os.IsNotExist(err) {
+			fmt.Printf("Error resetting session: %v\n", err)
+		} else {
+			fmt.Println("Session reset successfully. A new conversation will start next time.")
+		}
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(askCmd)
+	rootCmd.AddCommand(resetCmd)
+}
+
+func getSessionFilePath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".woorung_session"
+	}
+	return filepath.Join(home, ".woorung_session")
+}
+
+func loadThreadID() string {
+	data, err := os.ReadFile(getSessionFilePath())
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func saveThreadID(threadID string) {
+	if threadID == "" {
+		return
+	}
+	os.WriteFile(getSessionFilePath(), []byte(threadID), 0600)
 }
 
 func sendRequest(message string) {
@@ -38,18 +77,18 @@ func sendRequest(message string) {
 		return
 	}
 
+	threadID := loadThreadID()
+
 	payload := map[string]string{
-		"message": message,
-		"source":  "cli",
+		"message":   message,
+		"source":    "cli",
+		"thread_id": threadID,
 	}
 	jsonData, _ := json.Marshal(payload)
 
 	req, _ := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
-
-	// Debug Info
-	// fmt.Printf("DEBUG: Sending POST to %s with Token %s...\n", url, token[:10])
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -60,6 +99,18 @@ func sendRequest(message string) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
+	
+	// Parse response to capture thread_id
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err == nil {
+		if tid, ok := result["thread_id"].(string); ok && tid != "" {
+			saveThreadID(tid)
+			// Optional: Print session ID for debugging
+			// fmt.Printf("[Session: %s]\n", tid[:8])
+		}
+	} else {
+		// If fails to parse JSON, just print body string later
+	}
 	
 	var prettyJSON bytes.Buffer
 	if err := json.Indent(&prettyJSON, body, "", "  "); err == nil {

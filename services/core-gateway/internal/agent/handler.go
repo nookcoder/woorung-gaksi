@@ -19,8 +19,9 @@ func NewHandler(pmAgentURL string) *Handler {
 }
 
 type AskRequest struct {
-	Message string `json:"message" binding:"required"`
-	Source  string `json:"source"`
+	Message  string `json:"message" binding:"required"`
+	Source   string `json:"source"`
+	ThreadID string `json:"thread_id"` // Optional: For conversation persistence
 }
 
 func (h *Handler) Ask(c *gin.Context) {
@@ -35,9 +36,10 @@ func (h *Handler) Ask(c *gin.Context) {
 	// But for "Chat", let's do synchronous call first for simplicity
 	
 	// Create payload for Python
-	payload := map[string]string{
-		"message": req.Message,
-		"user_id": c.GetString("userID"), // from AuthMiddleware
+	payload := map[string]interface{}{
+		"message":   req.Message,
+		"user_id":   c.GetString("userID"), // from AuthMiddleware
+		"thread_id": req.ThreadID,          // Pass thread_id if exists
 	}
 	jsonData, _ := json.Marshal(payload)
 
@@ -54,6 +56,6 @@ func (h *Handler) Ask(c *gin.Context) {
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	// Just proxy the JSON response
+	// Just proxy the JSON response (which now includes thread_id)
 	c.Data(http.StatusOK, "application/json", body)
 }

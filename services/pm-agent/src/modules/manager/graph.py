@@ -5,6 +5,8 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from src.modules.manager.state import AgentState, Plan, Task
 from typing import Literal
+import sqlite3
+from langgraph.checkpoint.sqlite import SqliteSaver
 
 from src.shared.config import config
 from pydantic import SecretStr
@@ -33,7 +35,7 @@ planner_prompt = ChatPromptTemplate.from_messages([
 Your goal is to analyze the user's request and create a detailed execution plan.
 
 Available Sub-Agents:
-1. RESEARCH: Search the web, analyze data, summarize trends. 
+1. RESEARCH: Search the web, analyze data, summarize trends.
 2. CODING: Read, Write, and Edit files in the project directory. Use this agent for ANY file modification or code generation task.
 3. MEDIA: Create images, edit videos, generate shorts.
 4. REVIEW: Review the final output or answer simple questions directly.
@@ -315,5 +317,10 @@ workflow.add_conditional_edges(
     }
 )
 
-# Compile
-app = workflow.compile()
+# Persistence Setup
+# Using SQLite for local persistence without external DB
+conn = sqlite3.connect("db/checkpoints.sqlite", check_same_thread=False)
+checkpointer = SqliteSaver(conn)
+
+# Compile with Checkpointer
+app = workflow.compile(checkpointer=checkpointer)
