@@ -7,5 +7,6 @@ class Config:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")  # For DeepSeek or Custom endpoint
     MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o")
+    TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
 config = Config()

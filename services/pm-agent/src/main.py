@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
+from src.modules.manager.state import AgentState
 
 app = FastAPI(title="PM Agent", description="The Brain of Woorung-Gaksi")
 
@@ -26,10 +27,12 @@ async def ask_agent(req: AskRequest):
     print(f"Received from {req.user_id}: {req.message}")
     
     # Create Initial State
-    initial_state = {
+    initial_state: AgentState = {
         "messages": [HumanMessage(content=req.message)],
-        "user_id": req.user_id,
-        "current_step": 0
+        "user_id": req.user_id or "anonymous",
+        "current_task_index": 0,
+        "plan": None,
+        "final_response": None
     }
     
     # Run the Graph

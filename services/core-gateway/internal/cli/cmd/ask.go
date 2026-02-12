@@ -60,5 +60,11 @@ func sendRequest(message string) {
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
-	fmt.Printf("[Woorung Reply]: %s\n", string(body))
+	
+	var prettyJSON bytes.Buffer
+	if err := json.Indent(&prettyJSON, body, "", "  "); err == nil {
+		fmt.Printf("[Woorung Reply]:\n%s\n", prettyJSON.String())
+	} else {
+		fmt.Printf("[Woorung Reply]: %s\n", string(body))
+	}
 }
