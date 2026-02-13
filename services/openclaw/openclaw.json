@@ -10,17 +10,20 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "google/gemini-3-pro-preview"
+        "primary": "deepseek/deepseek-chat"
       },
       "models": {
+        "deepseek/deepseek-chat": {
+          "alias": "deepseek-v3"
+        },
+        "deepseek/deepseek-reasoner": {
+          "alias": "deepseek-r1"
+        },
         "google/gemini-3-pro-preview": {
           "alias": "gemini-3-pro"
         },
         "google/gemini-2.0-flash": {
           "alias": "gemini-2-flash"
-        },
-        "google/gemini-1.5-flash": {
-          "alias": "gemini-1.5-flash"
         }
       },
       "compaction": {
@@ -43,6 +46,31 @@
     "controlUi": {
       "allowInsecureAuth": true,
       "dangerouslyDisableDeviceAuth": true
+    }
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "deepseek": {
+        "baseUrl": "https://api.deepseek.com",
+        "apiKey": "${DEEPSEEK_API_KEY}",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "deepseek-chat",
+            "name": "DeepSeek V3",
+            "contextWindow": 64000,
+            "maxTokens": 8000
+          },
+          {
+            "id": "deepseek-reasoner",
+            "name": "DeepSeek R1",
+            "reasoning": true,
+            "contextWindow": 64000,
+            "maxTokens": 8000
+          }
+        ]
+      }
     }
   }
 }
