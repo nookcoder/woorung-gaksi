@@ -1,8 +1,12 @@
 """
-Alpha-K Agent: Macro Quant (Phase 1 - Market Filter)
-=====================================================
+Alpha-K Agent: Macro Quant (Phase 1 - Market Filter) v2
+========================================================
 rules/01_market_regime.md 구현체.
 ADR, V-KOSPI, 환율 상관계수를 통해 시장 진입 여부를 판단한다.
+
+[v2] 데이터 소스:
+  - MarketDataProvider가 TimescaleDB 우선 조회 (sector_indices, ohlcv_daily)
+  - FDR fallback (V-KOSPI, KOSPI 지수, USD/KRW)
 """
 import pandas as pd
 import numpy as np

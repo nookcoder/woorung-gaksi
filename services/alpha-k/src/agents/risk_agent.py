@@ -1,15 +1,22 @@
 """
-Alpha-K Agent: Risk Executioner (Phase 5)
-==========================================
+Alpha-K Agent: Risk Executioner (Phase 5) v2
+=============================================
 rules/06_risk_management.md 구현체.
 ATR 기반 동적 손절, 피라미딩 계획, R/R 비율 검증.
+
+[v2] Neo4j 공급망 리스크 분석 추가:
+  - 주요 공급업체/고객사의 이상 하락(>-5%) → 경고
+  - 경쟁사 동향 참조
 """
 import pandas as pd
 import pandas_ta as ta  # type: ignore
+from datetime import datetime, timedelta
 from typing import List, Dict
 import logging
 
 from ..domain.models import TradePlan, TechnicalResult, SmartMoneyResult, FundamentalResult
+from ..infrastructure.data_providers.market_data import MarketDataProvider
+from ..infrastructure.graph.graph_service import graph_service
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +27,7 @@ class RiskAgent:
     1) ATR(14) 기반 Dynamic Stop Loss
     2) Pyramiding: 30/30/40 분할 진입
     3) R/R Ratio >= 2.0 사전 검증
+    4) [NEW] 공급망 리스크: Neo4j 그래프 기반
     """
 
     def __init__(
@@ -27,10 +35,13 @@ class RiskAgent:
         account_balance: float = 100_000_000,  # 1억 원 기본
         max_risk_per_trade: float = 0.02,       # 매매당 최대 리스크 2%
         atr_multiplier: float = 3.0,            # Stop = Entry - 3 * ATR
+        data: MarketDataProvider = None,
     ):
         self.account_balance = account_balance
         self.max_risk_per_trade = max_risk_per_trade
         self.atr_multiplier = atr_multiplier
+        self.data = data or MarketDataProvider()
+        self.graph = graph_service
 
     def create_trade_plan(
         self,
@@ -49,42 +60,43 @@ class RiskAgent:
         atr = float(df['ATR_14'].iloc[-1]) if not pd.isna(df['ATR_14'].iloc[-1]) else 0
 
         # ─── Entry Zone ───
-        # VCP 패턴 감지 시 → Pivot Point를 Entry로
-        # Order Block 감지 시 → OB top을 Entry로
-        # 기본: 현재가
         entry = tech_result.current_price
         if tech_result.vcp.detected and tech_result.vcp.pivot_point > 0:
             entry = tech_result.vcp.pivot_point
         elif tech_result.order_blocks:
             latest_ob = tech_result.order_blocks[-1]
-            entry = latest_ob.top  # OB 상단 리테스트
+            entry = latest_ob.top
 
         # ─── Stop Loss (06_risk_management.md) ───
-        # Stop Price = Entry - 3 * ATR(14)
         stop_loss = entry - (self.atr_multiplier * atr)
-
-        # 안전장치: 손절가가 0 이하가 되지 않도록
         if stop_loss <= 0:
             stop_loss = entry * 0.93  # 7% 최대 손절
 
         risk_per_share = entry - stop_loss
 
         # ─── Target Price ───
-        # 1차 목표: 다음 저항선 또는 R/R 2.0 기준
         target_by_rr = entry + (risk_per_share * 2.0)
         target_by_resistance = tech_result.resistance
-
         target = max(target_by_rr, target_by_resistance)
 
         # ─── R/R Ratio ───
         rr_ratio = (target - entry) / risk_per_share if risk_per_share > 0 else 0
 
-        # R/R < 2.0이면 진입 불가 (06_risk_management.md: Non-negotiable)
         is_actionable = rr_ratio >= 2.0
 
+        # ─── [NEW] Supply Chain Risk Check ───
+        supply_chain_risk = self._check_supply_chain_risk(ticker)
+        if supply_chain_risk:
+            logger.warning(
+                f"[RiskAgent] Supply chain risk for {ticker}: {supply_chain_risk}"
+            )
+            # 공급망 리스크 시 배팅 사이즈 30% 축소
+            risk_adjustment = 0.7
+        else:
+            risk_adjustment = 1.0
+
         # ─── Position Sizing (Pyramiding) ───
-        # 06_risk_management.md: 30% → 30% → 40%
-        risk_amount = self.account_balance * self.max_risk_per_trade
+        risk_amount = self.account_balance * self.max_risk_per_trade * risk_adjustment
         total_shares = int(risk_amount / risk_per_share) if risk_per_share > 0 else 0
 
         pyramiding = [
@@ -94,9 +106,10 @@ class RiskAgent:
         ]
 
         # ─── Buy Reason ───
-        buy_reason = self._build_buy_reason(tech_result, fund_result, flow_result)
+        buy_reason = self._build_buy_reason(
+            tech_result, fund_result, flow_result, supply_chain_risk
+        )
 
-        # 종목명은 ticker에서 추출 (별도 API 필요 시 확장)
         name = ticker
 
         return TradePlan(
@@ -113,8 +126,63 @@ class RiskAgent:
             is_actionable=is_actionable,
         )
 
+    # ──────────────────────────────────────────────────────────────────
+    # [NEW] 공급망 리스크 분석
+    # ──────────────────────────────────────────────────────────────────
+
+    def _check_supply_chain_risk(self, ticker: str) -> List[str]:
+        """
+        Neo4j 공급망 데이터 + TimescaleDB 주가 데이터로 리스크 체크.
+        - 주요 공급업체/고객사의 최근 5일 수익률 < -5% → 경고
+        - 공급망 내 2-hop 종목 중 급락 종목이 있으면 경고
+        """
+        if not self.graph.is_available:
+            return []
+
+        risks = []
+        try:
+            supply_chain = self.graph.get_full_supply_chain(ticker)
+            related = supply_chain.get("suppliers", []) + supply_chain.get("customers", [])
+
+            if not related:
+                return []
+
+            end = datetime.now()
+            start_5d = (end - timedelta(days=10)).strftime("%Y-%m-%d")
+            end_str = end.strftime("%Y-%m-%d")
+
+            for rel in related[:8]:  # 최대 8개
+                rel_code = rel["ticker_code"]
+                rel_name = rel.get("ticker_name", rel_code)
+                product = rel.get("product", "")
+
+                try:
+                    df = self.data.get_ohlcv(rel_code, start_5d, end_str)
+                    if df.empty or len(df) < 2:
+                        continue
+
+                    # 최근 5일 수익률
+                    ret_5d = (df['Close'].iloc[-1] / df['Close'].iloc[0]) - 1
+                    if ret_5d < -0.05:
+                        risks.append(
+                            f"⚠️ {rel_name}({rel_code}) 5일 {ret_5d:.1%} 하락 "
+                            f"[{product}] — 공급망 리스크"
+                        )
+                except Exception:
+                    continue
+
+        except Exception as e:
+            logger.debug(f"[RiskAgent] Supply chain risk check failed: {e}")
+
+        return risks
+
+    # ──────────────────────────────────────────────────────────────────
+    # Buy Reason
+    # ──────────────────────────────────────────────────────────────────
+
     def _build_buy_reason(
-        self, tech: TechnicalResult, fund: FundamentalResult, flow: SmartMoneyResult
+        self, tech: TechnicalResult, fund: FundamentalResult,
+        flow: SmartMoneyResult, supply_chain_risk: List[str] = None,
     ) -> str:
         """매수 근거 요약을 생성한다."""
         reasons = []
@@ -135,6 +203,10 @@ class RiskAgent:
             reasons.append(f"매집 {flow.accumulation_days}일 연속")
         if flow.net_foreign_amount > 0:
             reasons.append(f"외인 순매수 {flow.net_foreign_amount:,.0f}M")
+
+        # [NEW] Supply Chain Risk
+        if supply_chain_risk:
+            reasons.append(f"⚠️ 공급망 리스크 {len(supply_chain_risk)}건")
 
         return " | ".join(reasons) if reasons else "N/A"
 

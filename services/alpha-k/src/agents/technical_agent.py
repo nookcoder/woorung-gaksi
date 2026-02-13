@@ -1,12 +1,17 @@
 """
-Alpha-K Agent: Technical Sniper (Phase 3A)
-===========================================
+Alpha-K Agent: Technical Sniper (Phase 3A) v2
+==============================================
 rules/03_technical_strategy.md 구현체.
 Order Block (SMC), VCP 패턴, Volume Profile(POC) 분석.
+
+[v2] 데이터 소스:
+  - TimescaleDB ohlcv_daily (우선) → FDR fallback
+  - df 파라미터가 None이면 자동으로 TimescaleDB에서 조회
 """
 import pandas as pd
 import numpy as np
 import pandas_ta as ta  # type: ignore
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import logging
 
@@ -24,13 +29,24 @@ class TechnicalAgent:
     1) Order Block: 강한 임펄스 직전 마지막 음봉 → 기관 매집 구간
     2) VCP: 3단계 변동성 축소 패턴 → 마지막 수축 고점 돌파 시 진입
     3) Volume Profile POC: 최대 거래 매물대 → 현재가가 POC 위에 있어야 함
+
+    [v2] df=None 시 자동으로 TimescaleDB에서 120일치 OHLCV 조회
     """
 
     def __init__(self, data: MarketDataProvider = None):
         self.data = data or MarketDataProvider()
 
-    def analyze(self, ticker: str, df: pd.DataFrame) -> TechnicalResult:
-        """종목의 기술적 분석을 수행한다."""
+    def analyze(self, ticker: str, df: pd.DataFrame = None) -> TechnicalResult:
+        """종목의 기술적 분석을 수행한다. df=None이면 TimescaleDB에서 자동 조회."""
+        # [v2] TimescaleDB 자동 조회
+        if df is None or df.empty:
+            end = datetime.now()
+            start = end - timedelta(days=180)
+            df = self.data.get_ohlcv(ticker, start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+            if df.empty:
+                logger.warning(f"[TechnicalAgent] No OHLCV data for {ticker}")
+                return self._empty_result(ticker)
+
         if df.empty or len(df) < 60:
             return self._empty_result(ticker)
 

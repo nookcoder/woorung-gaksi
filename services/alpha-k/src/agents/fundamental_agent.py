@@ -1,8 +1,12 @@
 """
-Alpha-K Agent: Fundamental Valuator (Phase 3B)
-================================================
+Alpha-K Agent: Fundamental Valuator (Phase 3B) v2
+===================================================
 rules/04_fundamental.md 구현체.
 Piotroski F-Score, 섹터 상대 PER, DART 리스크 체크.
+
+[v2] Neo4j 경쟁사 비교 분석 추가.
+  - 경쟁사 PER 대비 상대적 저평가/고평가 판단
+  - 공급망 리스크: 주요 공급업체/고객사의 건전성 체크
 """
 import os
 import requests
@@ -10,6 +14,8 @@ import logging
 from typing import Dict, Any, List, Optional
 
 from ..domain.models import FundamentalResult, FundamentalVerdict
+from ..infrastructure.data_providers.market_data import MarketDataProvider
+from ..infrastructure.graph.graph_service import graph_service
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +32,17 @@ class FundamentalAgent:
     1) Piotroski F-Score >= 7 → Pass, < 4 → Fail
     2) Sector Relative PER < 0.8 AND PEG < 1.5
     3) DART Risk Check (블랙리스트 키워드, CB 오버행)
+    4) [NEW] Neo4j 경쟁사 PER 비교 → Peer Relative Valuation
     """
 
-    def __init__(self, opendart_api_key: str = None):
+    def __init__(
+        self,
+        opendart_api_key: str = None,
+        data: MarketDataProvider = None,
+    ):
         self.opendart_api_key = opendart_api_key or os.getenv("OPENDART_API_KEY", "")
+        self.data = data or MarketDataProvider()
+        self.graph = graph_service
 
     def analyze(
         self, ticker: str,
@@ -43,6 +56,11 @@ class FundamentalAgent:
 
         # ─── 2. Sector Relative PER ───
         stock_per = financials.get("per", 0)
+
+        # [v2] Neo4j 경쟁사 PER로 상대 PER 보강
+        if sector_avg_per <= 0:
+            sector_avg_per = self._get_peer_avg_per(ticker)
+
         relative_per = stock_per / sector_avg_per if sector_avg_per > 0 else 999
         peg = financials.get("peg_ratio", 999)
 
@@ -67,13 +85,59 @@ class FundamentalAgent:
         )
 
     # ──────────────────────────────────────────────────────────────────
+    # [NEW] Neo4j 경쟁사 PER 비교
+    # ──────────────────────────────────────────────────────────────────
+
+    def _get_peer_avg_per(self, ticker: str) -> float:
+        """
+        Neo4j에서 경쟁사 목록 → KIS API로 각 경쟁사 PER 조회 → 평균.
+        경쟁사 데이터 없으면 테마 동료 종목으로 fallback.
+        """
+        if not self.graph.is_available:
+            return 0
+
+        try:
+            # 1차: 경쟁사
+            competitors = self.graph.get_competitors(ticker)
+            if not competitors:
+                # 2차: 테마 동료
+                peers = self.graph.get_theme_peers(ticker)
+                competitors = peers[:5] if peers else []
+
+            if not competitors:
+                return 0
+
+            per_values = []
+            for comp in competitors[:5]:  # 최대 5개
+                try:
+                    info = self.data.get_stock_info(comp["ticker_code"])
+                    per = info.get("per", 0)
+                    if per and 0 < per < 200:  # 유효한 PER만
+                        per_values.append(per)
+                except Exception:
+                    continue
+
+            if per_values:
+                avg_per = sum(per_values) / len(per_values)
+                logger.info(
+                    f"[FundamentalAgent] Peer avg PER for {ticker}: "
+                    f"{avg_per:.1f} (from {len(per_values)} peers)"
+                )
+                return avg_per
+
+        except Exception as e:
+            logger.debug(f"[FundamentalAgent] Peer PER lookup failed: {e}")
+
+        return 0
+
+    # ──────────────────────────────────────────────────────────────────
     # 1. Piotroski F-Score
     # ──────────────────────────────────────────────────────────────────
 
     def _calculate_f_score(self, f: Dict[str, Any]) -> int:
         """
         Piotroski F-Score (0-9).
-        
+
         각 1점씩 (04_fundamental.md 기준):
         1. ROA > 0
         2. OCF > 0
@@ -129,12 +193,11 @@ class FundamentalAgent:
         found_risks: List[str] = []
 
         try:
-            # OpenDART 공시 검색 API
             url = "https://opendart.fss.or.kr/api/list.json"
             params = {
                 "crtfc_key": self.opendart_api_key,
                 "corp_code": self._ticker_to_corp_code(ticker),
-                "bgn_de": "",  # 최근 6개월 자동 검색
+                "bgn_de": "",
                 "page_count": 100,
             }
 
@@ -160,11 +223,7 @@ class FundamentalAgent:
         return found_risks
 
     def _ticker_to_corp_code(self, ticker: str) -> str:
-        """
-        종목코드 → DART corp_code 변환.
-        실제 구현에서는 corp_code.xml 매핑 파일 필요.
-        여기서는 placeholder.
-        """
+        """종목코드 → DART corp_code 변환."""
         # TODO: corp_code.xml 다운로드 후 매핑 로직 구현
         return ticker
 
@@ -191,11 +250,9 @@ class FundamentalAgent:
 
         # Pass 조건
         if f_score >= 7:
-            # 상대 PER/PEG는 보조 지표 (데이터 없으면 무시)
             if rel_per < 0.8 and peg < 1.5:
                 return FundamentalVerdict.PASS
             elif rel_per >= 999 or peg >= 999:
-                # 데이터 부족 → F-Score만으로 판정
                 return FundamentalVerdict.PASS
             else:
                 return FundamentalVerdict.WARNING
