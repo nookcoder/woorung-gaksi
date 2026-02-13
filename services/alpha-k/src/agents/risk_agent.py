@@ -17,6 +17,7 @@ import logging
 from ..domain.models import TradePlan, TechnicalResult, SmartMoneyResult, FundamentalResult
 from ..infrastructure.data_providers.market_data import MarketDataProvider
 from ..infrastructure.graph.graph_service import graph_service
+from ..infrastructure.graph.event_service import event_service
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class RiskAgent:
     1) ATR(14) 기반 Dynamic Stop Loss
     2) Pyramiding: 30/30/40 분할 진입
     3) R/R Ratio >= 2.0 사전 검증
-    4) [NEW] 공급망 리스크: Neo4j 그래프 기반
+    4) [NEW] 공급망 리스크: Neo4j 그래프 + GraphRAG 이벤트 기반
     """
 
     def __init__(
@@ -42,6 +43,7 @@ class RiskAgent:
         self.atr_multiplier = atr_multiplier
         self.data = data or MarketDataProvider()
         self.graph = graph_service
+        self.event_service = event_service
 
     def create_trade_plan(
         self,
@@ -132,9 +134,9 @@ class RiskAgent:
 
     def _check_supply_chain_risk(self, ticker: str) -> List[str]:
         """
-        Neo4j 공급망 데이터 + TimescaleDB 주가 데이터로 리스크 체크.
+        Neo4j 공급망 데이터 + TimescaleDB 주가 데이터 + GraphRAG 이벤트로 리스크 체크.
         - 주요 공급업체/고객사의 최근 5일 수익률 < -5% → 경고
-        - 공급망 내 2-hop 종목 중 급락 종목이 있으면 경고
+        - 공급망 내 부정적 뉴스 이벤트(Impact < -0.3) → 경고
         """
         if not self.graph.is_available:
             return []
@@ -147,29 +149,38 @@ class RiskAgent:
             if not related:
                 return []
 
-            end = datetime.now()
-            start_5d = (end - timedelta(days=10)).strftime("%Y-%m-%d")
-            end_str = end.strftime("%Y-%m-%d")
+            # Time-Travel 지원
+            current_date = getattr(self.data, 'current_date', None) or datetime.now()
+            end_str = current_date.strftime("%Y-%m-%d")
+            start_5d = (current_date - timedelta(days=10)).strftime("%Y-%m-%d")
 
             for rel in related[:8]:  # 최대 8개
                 rel_code = rel["ticker_code"]
                 rel_name = rel.get("ticker_name", rel_code)
                 product = rel.get("product", "")
 
+                # 1. Price Crash Check
                 try:
                     df = self.data.get_ohlcv(rel_code, start_5d, end_str)
-                    if df.empty or len(df) < 2:
-                        continue
-
-                    # 최근 5일 수익률
-                    ret_5d = (df['Close'].iloc[-1] / df['Close'].iloc[0]) - 1
-                    if ret_5d < -0.05:
+                    if not df.empty and len(df) >= 2:
+                        ret_5d = (df['Close'].iloc[-1] / df['Close'].iloc[0]) - 1
+                        if ret_5d < -0.05:
+                            risks.append(
+                                f"⚠️ {rel_name}({rel_code}) 5일 {ret_5d:.1%} 하락 "
+                                f"[{product}] — 공급망 급락"
+                            )
+                except Exception:
+                    pass
+                
+                # 2. Event Risk Check (GraphRAG)
+                try:
+                    impact = self.event_service.get_ticker_impact(rel_code, end_str, days=5)
+                    if impact < -0.5: # 부정적 이벤트 강함
                         risks.append(
-                            f"⚠️ {rel_name}({rel_code}) 5일 {ret_5d:.1%} 하락 "
-                            f"[{product}] — 공급망 리스크"
+                            f"⚠️ {rel_name} 악재 발생 (Impact={impact:.1f}) — 공급망 뉴스 리스크"
                         )
                 except Exception:
-                    continue
+                    pass
 
         except Exception as e:
             logger.debug(f"[RiskAgent] Supply chain risk check failed: {e}")

@@ -12,7 +12,7 @@ import pandas as pd
 import numpy as np
 import FinanceDataReader as fdr
 from datetime import datetime, timedelta
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 import logging
 
 from .kis_client import KISClient

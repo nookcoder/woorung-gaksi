@@ -84,8 +84,16 @@ def check_market_router(state: AlphaKState) -> Literal["screening", "__end__"]:
     bet_size = regime.get("bet_size_multiplier", 0)
     force = state.get("force_analysis", False)
 
-    if (regime_val in ("CRASH", "BEAR") or bet_size <= 0) and not force:
-        print(f"  ✋ HARD STOP: Market is {regime_val}. Cash is King.")
+    if regime_val == "CRASH" and not force:
+        print(f"  ✋ HARD STOP: Market is CRASH. Cash is King.")
+        return "__end__"
+
+    if regime_val == "BEAR" and not force:
+        print("  ⚠️ CAUTION: Market is BEAR. Proceeding with extreme caution.")
+        # Proceed to screening
+    
+    elif bet_size <= 0 and not force:
+        print(f"  ✋ STOP: Bet Size is {bet_size}. Cash is King.")
         return "__end__"
 
     if force:
@@ -154,11 +162,6 @@ def deep_dive_node(state: AlphaKState) -> Dict:
             "current_phase": "deep_dive",
         }
 
-    end = datetime.now()
-    start = end - timedelta(days=365)
-    start_str = start.strftime("%Y-%m-%d")
-    end_str = end.strftime("%Y-%m-%d")
-
     tech_results = {}
     fund_results = {}
     flow_results = {}
@@ -167,14 +170,13 @@ def deep_dive_node(state: AlphaKState) -> Dict:
         print(f"\n  📊 Analyzing {ticker}...")
 
         try:
-            # 가격 데이터 fetch
-            df = data_provider.get_ohlcv(ticker, start_str, end_str)
-            if df.empty:
-                print(f"    ⚠️ No price data for {ticker}, skipping")
+            # 3A. Technical (TimescaleDB 자동 조회)
+            tech = technical_agent.analyze(ticker, df=None)
+            
+            if tech.current_price == 0:
+                print(f"    ⚠️ No data for {ticker}, skipping")
                 continue
 
-            # 3A. Technical
-            tech = technical_agent.analyze(ticker, df)
             tech_results[ticker] = {
                 "score": tech.score,
                 "vcp_detected": tech.vcp.detected,
@@ -194,14 +196,15 @@ def deep_dive_node(state: AlphaKState) -> Dict:
             }
             print(f"    [Tech] Score={tech.score:.0f} VCP={'✅' if tech.vcp.detected else '❌'} OB={len(tech.order_blocks)}")
 
-            # 3B. Fundamental (KIS API)
+            # 3B. Fundamental (KIS API + Neo4j Competitors)
             stock_info = data_provider.get_stock_info(ticker)
             kis_financials = data_provider.get_financial_statements(ticker)
             
             # KIS 데이터를 FundamentalAgent 포맷으로 변환
             financials = _map_kis_to_fundamental(stock_info, kis_financials)
             
-            fund = fundamental_agent.analyze(ticker, financials, sector_avg_per=15.0)
+            # Neo4j 경쟁사 비교 포함
+            fund = fundamental_agent.analyze(ticker, financials, sector_avg_per=0) # 0 = Auto lookup peers
             fund_results[ticker] = {
                 "f_score": fund.f_score,
                 "verdict": fund.verdict.value,
@@ -210,9 +213,9 @@ def deep_dive_node(state: AlphaKState) -> Dict:
                 "dart_risks": fund.dart_risks,
                 "summary": fund.summary,
             }
-            print(f"    [Fund] F-Score={fund.f_score}/9 Verdict={fund.verdict.value}")
+            print(f"    [Fund] F-Score={fund.f_score}/9 Verdict={fund.verdict.value} (Rel PER={fund.relative_per:.1f})")
 
-            # 3C. Smart Money
+            # 3C. Smart Money (TimescaleDB + Neo4j Group)
             flow = smart_money_agent.analyze(ticker)
             flow_results[ticker] = {
                 "flow_score": flow.flow_score.value,
@@ -222,7 +225,7 @@ def deep_dive_node(state: AlphaKState) -> Dict:
                 "net_foreign_m": flow.net_foreign_amount,
                 "net_inst_m": flow.net_inst_amount,
             }
-            print(f"    [Flow] Score={flow.flow_score.value} Accum={flow.accumulation_days}days")
+            print(f"    [Flow] Score={flow.flow_score.value} Accum={flow.accumulation_days}d Foreign={flow.net_foreign_amount:,.0f}M")
 
         except Exception as e:
             logger.error(f"[Phase 3] Error analyzing {ticker}: {e}")

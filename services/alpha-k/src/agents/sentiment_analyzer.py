@@ -45,17 +45,19 @@ SENTIMENT_PROMPT = """당신은 한국 주식시장 전문 뉴스 감성 분석�
 
 
 class SentimentAnalyzer:
-    """LLM 기반 뉴스 감성 분석기."""
+    """LLM 기반 뉴스 감성 분석기 + GraphRAG 이벤트 생성기."""
 
     BATCH_SIZE = 20  # 한 번에 분석할 뉴스 수
 
     def __init__(self):
         self.es = es_client
         self.llm = llm_client.get_agent_llm("sentiment")
+        self.event_service = event_service
 
     def run_analysis(self, limit: int = None):
         """
-        ES에서 분석되지 않은 뉴스를 가져와 감성 점수를 매긴다.
+        ES에서 분석되지 않은 뉴스를 가져와 감성 점수를 매기고,
+        중요 이벤트는 Neo4j 그래프에 저장한다.
         """
         logger.info("[SentimentAnalyzer] Starting sentiment analysis...")
 
@@ -107,6 +109,7 @@ class SentimentAnalyzer:
                     "doc_id": hit["_id"],
                     "ticker_code": hit["_source"].get("ticker_code", ""),
                     "title": hit["_source"].get("title", ""),
+                    "published_at": hit["_source"].get("published_at", ""),
                 }
                 for hit in hits
             ]
@@ -119,7 +122,8 @@ class SentimentAnalyzer:
         # 뉴스 목록 포맷팅
         news_lines = []
         for i, news in enumerate(batch):
-            news_lines.append(f"{i}. [{news['ticker_code']}] {news['title']}")
+            date_str = news.get("published_at", "")[:10]
+            news_lines.append(f"{i}. [{date_str}] {news['ticker_code']} - {news['title']}")
 
         news_text = "\n".join(news_lines)
         prompt = SENTIMENT_PROMPT.format(news_list=news_text)
@@ -129,14 +133,13 @@ class SentimentAnalyzer:
             response = self.llm.invoke(prompt)
             content = response.content.strip()
 
-            # JSON 파싱 (```json ... ``` 래핑 제거)
-            if content.startswith("```"):
+            # JSON 파싱
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0]
+            elif "```" in content:
                 content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-            content = content.strip()
-
-            results = json.loads(content)
+            
+            results = json.loads(content.strip())
         except json.JSONDecodeError as e:
             logger.error(f"[SentimentAnalyzer] JSON parse error: {e}")
             logger.debug(f"[SentimentAnalyzer] Raw response: {content[:500]}")
@@ -145,17 +148,21 @@ class SentimentAnalyzer:
             logger.error(f"[SentimentAnalyzer] LLM call failed: {e}")
             return 0
 
-        # 3. ES 문서 업데이트
+        # 결과 처리 & 저장
         scored = 0
         for result in results:
             try:
                 idx = result.get("index", -1)
                 if 0 <= idx < len(batch):
                     doc_id = batch[idx]["doc_id"]
-                    score = max(-1.0, min(1.0, float(result.get("score", 0))))
+                    ticker = batch[idx]["ticker_code"]
+                    pub_date = batch[idx]["published_at"][:10] # YYYY-MM-DD
+                    
+                    score = float(result.get("score", 0))
                     impact = result.get("impact", "SHORT")
                     reason = result.get("reason", "")
 
+                    # 1. ES 업데이트
                     self.es.client.update(
                         index=ESClient.INDEX_NEWS,
                         id=doc_id,
@@ -167,6 +174,21 @@ class SentimentAnalyzer:
                             }
                         },
                     )
+                    
+                    # 2. [GraphRAG] Neo4j 이벤트 노드 생성 (중요 이벤트만)
+                    if abs(score) >= 0.3:
+                        try:
+                            event_id = self.event_service.create_event(
+                                summary=reason, # or title
+                                sentiment_score=score,
+                                date=pub_date
+                            )
+                            if event_id:
+                                self.event_service.link_event_to_entity(event_id, ticker, "MENTIONS")
+                                logger.debug(f"[GraphRAG] Event created for {ticker}: {event_id}")
+                        except Exception as ge:
+                            logger.warning(f"[GraphRAG] Failed to create event: {ge}")
+
                     scored += 1
             except Exception as e:
                 logger.error(f"[SentimentAnalyzer] ES update failed: {e}")

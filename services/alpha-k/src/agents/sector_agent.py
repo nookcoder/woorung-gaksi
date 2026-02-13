@@ -19,6 +19,7 @@ import logging
 from ..domain.models import SectorScore, CandidateScreeningResult
 from ..infrastructure.data_providers.market_data import MarketDataProvider
 from ..infrastructure.graph.graph_service import graph_service
+from ..infrastructure.graph.event_service import event_service
 
 logger = logging.getLogger(__name__)
 
@@ -55,18 +56,21 @@ class SectorAgent:
     Phase 2: 섹터 로테이션 + 테마 분석.
 
     [기존] 업종별 RS Score → 상위 3개 섹터 → 1차 필터
-    [신규] Neo4j 테마 매핑 → 테마 모멘텀 분석 → 테마기반 후보 확장
+    [신규] Neo4j 테마 매핑 → 테마 모멘텀 + 뉴스 이벤트(GraphRAG) 분석 → 테마기반 후보 확장
     """
 
     def __init__(self, data: MarketDataProvider = None):
         self.data = data or MarketDataProvider()
         self.graph = graph_service
+        self.event_service = event_service
 
     def analyze(self) -> CandidateScreeningResult:
         """섹터 스크리닝 + 테마 분석을 실행한다."""
-        end = datetime.now()
-        end_str = end.strftime("%Y-%m-%d")
-        start_3m = (end - timedelta(days=90)).strftime("%Y-%m-%d")
+        # Time-Travel 지원: Provider에 설정된 날짜가 있으면 사용
+        current_date = getattr(self.data, 'current_date', None) or datetime.now()
+        end_str = current_date.strftime("%Y-%m-%d")
+        start_3m_dt = current_date - timedelta(days=90)
+        start_3m = start_3m_dt.strftime("%Y-%m-%d")
 
         # ─── 1. 벤치마크 수익률 (KOSPI) ───
         kospi_returns = self._get_benchmark_returns(start_3m, end_str)
@@ -82,9 +86,9 @@ class SectorAgent:
         candidates = self._filter_candidates(top_sectors, start_3m, end_str)
         logger.info(f"[SectorAgent] KIS sector candidates: {len(candidates)}")
 
-        # ─── 4. [NEW] Neo4j 테마 기반 후보 확장 ───
+        # ─── 4. [NEW] Neo4j 테마 + Event Impact 기반 후보 확장 ───
         theme_candidates = self._get_theme_candidates(
-            candidates, start_3m, end_str
+            candidates, start_3m, end_str, current_date=end_str
         )
         for tc in theme_candidates:
             if tc not in candidates:
@@ -108,13 +112,13 @@ class SectorAgent:
     # ─────────────────────────────────────────────
 
     def _get_theme_candidates(
-        self, existing_candidates: List[str], start_3m: str, end_str: str
+        self, existing_candidates: List[str], start_3m: str, end_str: str, current_date: str = None
     ) -> List[str]:
         """
         Neo4j 테마 기반 후보 확장.
         1) 기존 후보 종목이 속한 테마 조회
         2) 해당 테마의 다른 종목(동료) 중 1차 필터 통과 종목 추가
-        3) 모멘텀이 좋은 테마의 종목도 추가
+        3) 모멘텀 + 뉴스 호재(GraphRAG)가 좋은 테마의 종목도 추가
         """
         if not self.graph.is_available:
             logger.warning("[SectorAgent] Neo4j not available, skipping theme expansion")
@@ -139,7 +143,7 @@ class SectorAgent:
             except Exception as e:
                 logger.debug(f"[SectorAgent] Theme peer lookup failed for {ticker}: {e}")
 
-        # ──── 방법 2: 모멘텀이 좋은 테마 종목 추가 ────
+        # ──── 방법 2: 모멘텀 + 이벤트 파급력이 좋은 테마 종목 추가 ────
         try:
             top_themes = self.graph.get_top_themes_with_tickers(limit=5)
             for theme_data in top_themes:
@@ -148,17 +152,31 @@ class SectorAgent:
                     continue
 
                 tickers_in_theme = theme_data.get("tickers", [])
-                # 테마 종목의 평균 수익률 계산
-                momentum = self._calculate_theme_momentum(
+                
+                # 1. Price Momentum
+                price_momentum = self._calculate_theme_momentum(
                     [t["code"] for t in tickers_in_theme[:10]],
                     start_3m, end_str
                 )
-                if momentum > 0.02:  # 3개월 수익률 2% 이상
+                
+                # 2. Event Impact (GraphRAG)
+                if current_date:
+                    event_impact = self.event_service.get_theme_impact(theme_name, current_date, days=7)
+                else:
+                    event_impact = 0.0
+
+                # Combined Score
+                # Price Momentum > 2% OR Event Impact > 0.5 (Positive Sentiment)
+                if price_momentum > 0.02 or event_impact > 0.5:
+                    logger.info(f"  ✨ Theme '{theme_name}' Selected: Mom={price_momentum:.1%} Impact={event_impact:.1f}")
+                    seen_themes.add(theme_name)
+                    
                     for t in tickers_in_theme:
                         code = t["code"]
                         if (code not in existing_candidates and
                                 code not in theme_tickers):
                             theme_tickers.append(code)
+                            
         except Exception as e:
             logger.debug(f"[SectorAgent] Theme momentum scan failed: {e}")
 
@@ -182,9 +200,12 @@ class SectorAgent:
         for ticker, df in ohlcv_map.items():
             if df.empty or len(df) < 5:
                 continue
-            ret = (df['Close'].iloc[-1] / df['Close'].iloc[0]) - 1
-            if not np.isnan(ret):
-                returns.append(float(ret))
+            try:
+                ret = (df['Close'].iloc[-1] / df['Close'].iloc[0]) - 1
+                if not np.isnan(ret):
+                    returns.append(float(ret))
+            except:
+                pass
 
         return np.mean(returns) if returns else 0.0
 
@@ -213,7 +234,10 @@ class SectorAgent:
 
                 # 60MA 필터
                 ma60 = df['Close'].rolling(60).mean().iloc[-1]
-                if pd.isna(ma60) or df['Close'].iloc[-1] <= ma60 * 0.95:
+                current_price = df['Close'].iloc[-1]
+                
+                # 조건: 현재가가 60MA의 95% 이상이어야 함 (역배열 심하면 제외)
+                if pd.isna(ma60) or current_price <= ma60 * 0.95:
                     continue
 
                 passed.append(ticker)
