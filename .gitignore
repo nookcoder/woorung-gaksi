@@ -27,7 +27,7 @@ build/
 htmlcov/
 
 # Database Data
-db/
+/db/
 
 # Logs
 *.log

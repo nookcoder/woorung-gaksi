@@ -129,7 +129,7 @@ class KISClient:
         }
 
         data = self._get(
-            "/uapi/domestic-stock/v1/quotations/inquire-daily-itemprice",
+            "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
             "FHKST03010100",
             params,
         )

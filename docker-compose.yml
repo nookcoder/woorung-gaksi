@@ -19,9 +19,9 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL}
       - MODEL_NAME=${MODEL_NAME}
       - TAVILY_API_KEY=${TAVILY_API_KEY}
-      - DB_URI=postgresql://woorung:gaksi@postgres:5432/woorung_db
+      - DB_URI=postgresql://woorung:gaksi@timescaledb:5432/woorung_db
     depends_on:
-      - postgres
+      - timescaledb
     networks:
       - woorung-net
     command:
@@ -53,6 +53,8 @@ services:
       - KIS_APP_SECRET=${KIS_APP_SECRET}
       - KIS_ACCOUNT_NO=${KIS_ACCOUNT_NO}
       - OPENDART_API_KEY=${OPENDART_API_KEY}
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - DEEPSEEK_API_KEY=${OPENAI_API_KEY}
     networks:
       - woorung-net
     command:
@@ -107,20 +109,97 @@ services:
       timeout: 10s
       retries: 3
 
-  postgres:
-    image: postgres:16-alpine
-    container_name: woorung-postgres
+  # -------------------------------------------------------------
+  # Data Layer (TimescaleDB, Redis, Elasticsearch, Neo4j)
+  # -------------------------------------------------------------
+
+  timescaledb:
+    image: timescale/timescaledb-ha:pg16
+    container_name: woorung-timescaledb
     restart: always
     environment:
       POSTGRES_USER: woorung
       POSTGRES_PASSWORD: gaksi
       POSTGRES_DB: woorung_db
+      TS_TUNE_MEMORY: "2GB" # Optimize for Mac mini (8GB/16GB)
     ports:
       - "5432:5432"
     volumes:
-      - ./db/postgres-data:/var/lib/postgresql/data
+      - ./db/timescale-data:/var/lib/postgresql/data
     networks:
       - woorung-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U woorung"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: woorung-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./db/redis-data:/data
+    networks:
+      - woorung-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  elasticsearch:
+    image: elasticsearch:8.12.0
+    container_name: woorung-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g" # Limit Heap
+    ports:
+      - "9200:9200"
+    volumes:
+      - ./db/es-data:/usr/share/elasticsearch/data
+    networks:
+      - woorung-net
+    command: >
+      /bin/sh -c "./bin/elasticsearch-plugin install --batch analysis-nori && ./bin/elasticsearch"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    mem_limit: 2g
+
+  neo4j:
+    image: neo4j:5.16.0
+    container_name: woorung-neo4j
+    environment:
+      - NEO4J_AUTH=neo4j/woorung1234
+      - NEO4J_dbms_memory_heap_initial__size=512m
+      - NEO4J_dbms_memory_heap_max__size=1G
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - ./db/neo4j-data:/data
+    networks:
+      - woorung-net
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:7474",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    mem_limit: 1.5g
 
 networks:
   woorung-net:
