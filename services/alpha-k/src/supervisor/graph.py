@@ -271,12 +271,17 @@ def scoring_node(state: AlphaKState) -> Dict:
         if fund.get("verdict") == "FAIL":
             print(f"  ❌ {ticker}: Fundamental FAIL → Excluded")
             continue
-        if tech.get("score", 0) < 70:
-            print(f"  ❌ {ticker}: Tech Score {tech.get('score', 0):.0f} < 70 → Excluded")
+        
+        # Relaxed Technical Score Filter (70 -> 50)
+        current_tech_score = tech.get("score", 0)
+        if current_tech_score < 50:
+            print(f"  ❌ {ticker}: Tech Score {current_tech_score:.0f} < 50 → Excluded")
             continue
-        if flow.get("flow_score") == "LOW":
-            print(f"  ❌ {ticker}: Flow LOW → Excluded")
-            continue
+            
+        # Relaxed Flow Filter (Removed explicit LOW exclusion)
+        # if flow.get("flow_score") == "LOW":
+        #    print(f"  ❌ {ticker}: Flow LOW → Excluded")
+        #    continue
 
         # ─── Score Conversion ───
         tech_score = tech.get("score", 0)
@@ -415,6 +420,35 @@ def report_node(state: AlphaKState) -> Dict:
     plans = state.get("trade_plans") or []
     scored = state.get("scored_candidates") or []
 
+    # 1. Try LLM Generation
+    try:
+        from ..infrastructure.llm_client import llm_client
+        llm = llm_client.get_agent_llm("report")
+        
+        if llm:
+            prompt = (
+                f"You are the Chief Investment Officer (CIO) of Alpha-K.\n"
+                f"Write a professional daily trading report based on the following data:\n\n"
+                f"1. Market Regime:\n{regime}\n\n"
+                f"2. Top Sectors:\n{top_sectors[:3]}\n\n"
+                f"3. Final Candidates:\n{scored[:5]}\n\n"
+                f"4. Trade Plans (Actionable):\n{[p for p in plans if p.get('is_actionable')]}\n\n"
+                f"Requirements:\n"
+                f"- Format in Markdown.\n"
+                f"- Start with an Executive Summary.\n"
+                f"- Explain *why* these sectors/stocks were chosen using financial reasoning.\n"
+                f"- Present the trade plans clearly (Entry, Stop Loss, Target).\n"
+                f"- Tone: Professional, authoritative, and concise."
+            )
+            
+            response = llm.invoke(prompt)
+            print("  ✅ LLM Report Generated")
+            return {"report": response.content, "current_phase": "done"}
+            
+    except Exception as e:
+        logger.warning(f"[Report] LLM generation failed: {e}. Falling back to template.")
+
+    # 2. Fallback Template
     report_lines = [
         f"# 📈 Alpha-K Trading Report",
         f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M')}",

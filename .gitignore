@@ -38,3 +38,4 @@ services/openclaw/state/
 # Core Gateway Configs
 services/core-gateway/config/envs/*
 !services/core-gateway/config/envs/.gitkeep
+services/alpha-k/config/llm_config.yaml

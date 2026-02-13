@@ -48,6 +48,11 @@ class MacroAgent:
             adr_20d, vkospi, vkospi_prev, kospi_above_20ma, usd_krw_corr
         )
 
+        # ─── LLM Analysis (Optional) ───
+        llm_insight = self._get_llm_analysis(regime, adr_20d, vkospi, usd_krw_corr)
+        if llm_insight:
+            reason = f"{reason}\n\n[💡 AI Insight]\n{llm_insight}"
+
         return MarketRegimeResult(
             regime=regime,
             adr_20d=adr_20d,
@@ -58,6 +63,30 @@ class MacroAgent:
             bet_size_multiplier=bet_size,
             reason=reason,
         )
+
+    def _get_llm_analysis(self, regime, adr, vkospi, fx_corr) -> str:
+        """Call LLM to generate qualitative market analysis."""
+        try:
+            from ..infrastructure.llm_client import llm_client
+            llm = llm_client.get_agent_llm("macro")
+            if not llm:
+                return ""
+
+            prompt = (
+                f"You are a professional Macro Analyst for the Korean Stock Market (KOSPI/KOSDAQ).\n"
+                f"Analyze the current market regime based on the following indicators:\n"
+                f"- Market Regime: {regime.value}\n"
+                f"- ADR (Advance-Decline Ratio): {adr:.1f} (Normal: 75-120)\n"
+                f"- V-KOSPI (Volatility): {vkospi:.1f}\n"
+                f"- USD/KRW vs KOSPI Correlation: {fx_corr:.2f} (Positive correlation implies decoupling risk)\n\n"
+                f"Provide a concise, 2-sentence strategic advice for a swing trader."
+            )
+            
+            response = llm.invoke(prompt)
+            return response.content.strip()
+        except Exception as e:
+            logger.warning(f"[MacroAgent] LLM analysis failed: {e}")
+            return ""
 
     def _calculate_adr(self, start: str, end: str) -> float:
         """

@@ -43,8 +43,8 @@ KIS_SECTORS = {
     "1015": "제조",
 }
 
-# 1차 필터 기준: 거래대금 500억 원 이상
-MIN_TRADING_VALUE = 50_000_000_000  # 50B KRW
+# 1차 필터 기준: 거래대금 100억 원 이상
+MIN_TRADING_VALUE = 10_000_000_000  # 10B KRW
 
 
 class SectorAgent:
@@ -52,7 +52,7 @@ class SectorAgent:
     Phase 2: 섹터 로테이션.
     1) KOSPI/KOSDAQ 업종별 RS Score 계산 (KIS API)
     2) 상위 3개 섹터 선정
-    3) 1차 필터: 매입 대상 종목 선별 (거래대금 > 500억 AND 주가 > 60MA)
+    3) 1차 필터: 매입 대상 종목 선별 (거래대금 > 100억 AND 주가 > 60MA * 0.95)
     """
 
     def __init__(self, data: MarketDataProvider = None):
@@ -81,11 +81,36 @@ class SectorAgent:
         # ─── 1차 필터: 후보 종목 선별 ───
         candidates = self._filter_candidates(top_sectors, start_3m, end_str)
 
+        # ─── LLM Sector Theme Analysis ───
+        self._analyze_sector_themes(top_sectors)
+
         return CandidateScreeningResult(
             top_sectors=top_sectors,
             candidate_tickers=candidates,
             total_scanned=len(candidates),
         )
+
+    def _analyze_sector_themes(self, top_sectors: List[SectorScore]):
+        """LLM을 사용하여 상위 섹터의 상승 이유(테마)를 추론한다."""
+        try:
+            from ..infrastructure.llm_client import llm_client
+            llm = llm_client.get_agent_llm("sector")
+            if not llm:
+                return
+
+            sector_names = [s.sector_name for s in top_sectors]
+            prompt = (
+                f"The following sectors are currently leading the Korean stock market based on RS Score: {', '.join(sector_names)}.\n"
+                f"Briefly explain the potential reasons or themes driving these sectors right now (e.g., AI boom, policy changes, seasonality)."
+            )
+            
+            # 비동기로 실행하거나 결과를 어딘가에 저장하면 좋지만, 
+            # 현재 구조상 로그에 남기거나 추후 리포트 단계에서 활용하도록 설계
+            response = llm.invoke(prompt)
+            logger.info(f"[SectorAgent] LLM Insight:\n{response.content}")
+            
+        except Exception as e:
+            logger.warning(f"[SectorAgent] LLM theme analysis failed: {e}")
 
     def _get_benchmark_returns(self, start_3m: str, end: str) -> Dict[str, float]:
         """KOSPI 벤치마크 수익률 (1주, 1개월, 3개월). FDR 사용."""
@@ -152,7 +177,7 @@ class SectorAgent:
     ) -> List[str]:
         """
         상위 섹터 내 종목 중 1차 필터 통과 종목을 반환한다.
-        필터: 거래대금 > 500억 AND 주가 > 60일 이평선
+        필터: 거래대금 > 100억 AND 주가 > 60일 이평선 * 0.95
         """
         candidates = []
         for sector in top_sectors:
@@ -179,7 +204,7 @@ class SectorAgent:
                             continue
 
                         ma60 = ohlcv['Close'].rolling(60).mean().iloc[-1]
-                        if pd.isna(ma60) or ohlcv['Close'].iloc[-1] <= ma60:
+                        if pd.isna(ma60) or ohlcv['Close'].iloc[-1] <= ma60 * 0.95:
                             continue
 
                         if ticker not in candidates:

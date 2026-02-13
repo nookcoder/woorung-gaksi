@@ -1,12 +1,14 @@
-# Alpha-K Trading Expert
+# Alpha-K Stock Advisor
 
-This skill allows the agent to perform professional market analysis and swing trading screening using the Alpha-K expert system.
+This skill enables the agent to act as a professional stock trading advisor using the Alpha-K expert system.
+Use this skill when the user asks for **stock recommendations**, **market analysis**, **sector trends**, or **analysis of specific stocks**.
 
 ## Tools
 
 ### analyze_stock
 
-Perform technical, fundamental, and smart money analysis on specific stock tickers.
+Perform deep technical, fundamental, and smart money analysis on specific stock tickers.
+Use this when the user asks about specific stocks (e.g., "Analyze Samsung Electronics", "Is SK Hynix a buy?").
 
 **Parameters:**
 
@@ -24,7 +26,8 @@ curl -X POST "http://alpha-k:8001/analyze" \
 
 ### full_market_screening
 
-Perform a full market screening to identify top sectors and candidates for swing trading.
+Perform a full market screening to identify top sectors and recommended candidates for swing trading.
+**Use this tool when the user asks for stock recommendations** (e.g., "Recommend me some stocks", "What should I buy today?", "Find swing trading opportunities").
 
 **Parameters:**
 

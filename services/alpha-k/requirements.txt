@@ -11,3 +11,8 @@ uvicorn>=0.22.0
 pydantic>=2.0.0
 setuptools<81
 
+# LLM Support
+langchain>=0.1.0
+langchain-openai>=0.0.8
+langchain-anthropic>=0.1.0
+pyyaml>=6.0
