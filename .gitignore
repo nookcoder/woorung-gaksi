@@ -1,11 +1,40 @@
 # MacOS
 .DS_Store
 
-# Environment
+# Environment Variables
 .env
+.env.*
+!.env.example
+
+# Virtual Environments
+venv/
+.venv/
+ENV/
+env/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Database Data
 db/
 
 # Logs
 *.log
+
+# OpenClaw State
+services/openclaw/state/
+
+# Core Gateway Configs
+services/core-gateway/config/envs/*
+!services/core-gateway/config/envs/.gitkeep

@@ -40,3 +40,5 @@ class AlphaKState(TypedDict):
     # ─── Control ───
     current_phase: str  # "market_filter" | "screening" | "deep_dive" | "scoring" | "trade_setup" | "done"
     error: Optional[str]
+    force_analysis: bool # BEAR/CRASH 상황에서도 분석을 강제할지 여부
+

@@ -82,12 +82,17 @@ def check_market_router(state: AlphaKState) -> Literal["screening", "__end__"]:
 
     regime_val = regime.get("regime", "NORMAL")
     bet_size = regime.get("bet_size_multiplier", 0)
+    force = state.get("force_analysis", False)
 
-    if regime_val in ("CRASH", "BEAR") or bet_size <= 0:
+    if (regime_val in ("CRASH", "BEAR") or bet_size <= 0) and not force:
         print(f"  ✋ HARD STOP: Market is {regime_val}. Cash is King.")
         return "__end__"
 
+    if force:
+        print(f"  ⚡ Force Analysis Enabled: Ignoring market regime ({regime_val})")
+
     return "screening"
+
 
 
 # ═══════════════════════════════════════════════════════════════════

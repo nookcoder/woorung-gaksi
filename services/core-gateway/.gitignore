@@ -1,5 +1,0 @@
-# Ignore all environment configs (secrets)
-config/envs/*
-
-# Keep the directory structure
-!config/envs/.gitkeep

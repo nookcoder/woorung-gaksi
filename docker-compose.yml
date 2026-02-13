@@ -35,27 +35,77 @@ services:
         "--reload",
       ]
 
-  core-gateway:
+  alpha-k:
     build:
-      context: ./services/core-gateway
-    container_name: woorung-core-gateway
+      context: ./services/alpha-k
+    container_name: woorung-alpha-k
     ports:
-      - "8080:8080"
+      - "8001:8001"
+    volumes:
+      - ./services/alpha-k/src:/app/src
     environment:
-      - PM_AGENT_URL=http://pm-agent:8000
-      - API_SECRET=${API_SECRET:-woorung-secret} # Default if not set
-      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
-      - TELEGRAM_ALLOWED_ID=${TELEGRAM_ALLOWED_ID}
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USER=woorung
-      - DB_PASSWORD=gaksi
-      - DB_NAME=woorung_db
-    depends_on:
-      - pm-agent
-      - postgres
+      - PYTHONPATH=/app
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL}
+      - MODEL_NAME=${MODEL_NAME}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - KIS_APP_KEY=${KIS_APP_KEY}
+      - KIS_APP_SECRET=${KIS_APP_SECRET}
+      - KIS_ACCOUNT_NO=${KIS_ACCOUNT_NO}
+      - OPENDART_API_KEY=${OPENDART_API_KEY}
     networks:
       - woorung-net
+    command:
+      [
+        "uvicorn",
+        "src.api_main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8001",
+        "--reload",
+      ]
+
+  openclaw:
+    build:
+      context: ./services/openclaw
+    container_name: woorung-openclaw
+    ports:
+      - "18789:18789"
+    volumes:
+      - ./services/openclaw/state:/home/openclaw/.openclaw/state
+      - ./services/openclaw/skills:/home/openclaw/.openclaw/skills
+      - ./services/openclaw/openclaw.json:/home/openclaw/.openclaw/openclaw.json
+    environment:
+      - OPENCLAW_HOME=/home/openclaw/.openclaw
+      - OPENCLAW_STATE_DIR=/home/openclaw/.openclaw/state
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL}
+      - DEEPSEEK_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-woorung-claw-secret}
+      - AUTH_PASSWORD=${OPENCLAW_PASSWORD:-admin_pass}
+      - OPENCLAW_PRIMARY_MODEL=${OPENCLAW_PRIMARY_MODEL}
+      - OPENCLAW_GATEWAY_CONTROL_UI_ALLOW_INSECURE_AUTH=true
+      - OPENCLAW_CONFIG_PATH=/home/openclaw/.openclaw/openclaw.json
+    security_opt:
+      - no-new-privileges:true
+    # Drop all capabilities and add only what is needed (usually none for this gateway)
+    cap_drop:
+      - ALL
+    networks:
+      - woorung-net
+    depends_on:
+      - alpha-k
+      - pm-agent
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:18789/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   postgres:
     image: postgres:16-alpine
