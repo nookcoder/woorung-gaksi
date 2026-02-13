@@ -1,7 +1,9 @@
 import sys
 import os
+import asyncio
 import logging
 from typing import List, Optional
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, BackgroundTasks
 from pydantic import BaseModel
 from datetime import datetime
@@ -28,10 +30,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger("alpha-k-api")
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """컨테이너 시작 시 스케줄러를 백그라운드로 실행."""
+    from src.scheduler import run_scheduler
+    scheduler_task = asyncio.create_task(run_scheduler())
+    logger.info("[Lifespan] Scheduler started")
+    yield
+    scheduler_task.cancel()
+    logger.info("[Lifespan] Scheduler stopped")
+
+
 app = FastAPI(
-    title="Alpha-K Trading API", 
+    title="Alpha-K Trading API",
     description="Professional Multi-Agent Swing Trading System API",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 class AnalysisRequest(BaseModel):
