@@ -199,3 +199,46 @@ class AlphaKReport:
     screening: CandidateScreeningResult
     trade_plans: List[TradePlan]
     markdown: str                   # 최종 마크다운 리포트
+
+
+# ─────────────────────────────────────────────
+# Phase 6: Portfolio Optimization
+# ─────────────────────────────────────────────
+
+@dataclass
+class PortfolioAllocation:
+    """개별 종목 배분 결과"""
+    ticker: str
+    name: str
+    weight: float                   # 배분 비율 (0.0 ~ 1.0)
+    shares: int                     # 배분 주식 수
+    allocated_amount: float         # 배분 금액 (원)
+    volatility: float               # 연환산 변동성
+    risk_contribution: float        # 포트폴리오 리스크 기여도 (%)
+    correlation_max: float          # 포트폴리오 내 다른 종목과의 최대 상관계수
+    entry_price: float              # 진입 예상가
+
+
+@dataclass
+class PortfolioRiskMetrics:
+    """포트폴리오 전체 리스크 지표"""
+    portfolio_volatility: float     # 연환산 포트폴리오 변동성
+    sharpe_ratio: float             # Sharpe Ratio (Rf=3.5% 기준)
+    var_95: float                   # 95% VaR (1일, 원)
+    var_99: float                   # 99% VaR (1일, 원)
+    max_drawdown: float             # 히스토리컬 MDD
+    diversification_ratio: float    # 분산 비율 (높을수록 잘 분산됨)
+    correlation_matrix: Dict        # {ticker: {ticker: corr}} 요약
+
+
+@dataclass
+class OptimizedPortfolio:
+    """최적화된 포트폴리오"""
+    allocations: List[PortfolioAllocation]
+    risk_metrics: PortfolioRiskMetrics
+    total_invested: float           # 총 투자금액
+    cash_reserve: float             # 현금 보유 (미투자)
+    num_positions: int              # 포지션 수
+    method: str                     # 최적화 방법 (risk_parity, equal_weight, etc.)
+    filtered_tickers: List[str]     # 상관관계 필터로 제외된 종목
+    reason: str                     # 최적화 판단 요약
