@@ -38,9 +38,18 @@ class Neo4jClient:
             return
         self._initialized = True
 
-        self.uri = uri or os.getenv("NEO4J_URI", "bolt://neo4j:7687")
-        self.user = user or os.getenv("NEO4J_USER", "neo4j")
-        self.password = password or os.getenv("NEO4J_PASSWORD", "woorung1234")
+        self.uri = uri or os.getenv("NEO4J_URI")
+        self.user = user or os.getenv("NEO4J_USER")
+        self.password = password or os.getenv("NEO4J_PASSWORD")
+
+        if not all([self.uri, self.user, self.password]):
+            logger.warning("[Neo4j] Missing environment variables. Connection might fail.")
+            # We don't raise here because Neo4j might be optional? 
+            # But the user asked to "manage in env vars", implying strictness.
+            # However, if Neo4j is critical, we should log error.
+            # Let's align with DB client strictness but maybe just log error if it's optional feature.
+            # Given it's "infrastructure", let's assume it should be configured if used.
+
 
         try:
             self.driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))

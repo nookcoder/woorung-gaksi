@@ -26,7 +26,11 @@ class ESClient:
         """Connect to Elasticsearch."""
         try:
             # Default to docker service name 'elasticsearch'
-            es_host = os.getenv("ELASTICSEARCH_URL", "http://elasticsearch:9200")
+            es_host = os.getenv("ELASTICSEARCH_URL")
+            if not es_host:
+                logger.warning("[ESClient] ELASTICSEARCH_URL not set.")
+                self.client = None
+                return
             
             self.client = Elasticsearch(
                 es_host,

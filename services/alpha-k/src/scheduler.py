@@ -68,6 +68,13 @@ def job_investor_trading():
         collector.collect_sector_indices()
 
 
+def job_financial_collection():
+    """재무제표 데이터 업데이트."""
+    from src.collector.financial_collector import FinancialCollector
+    collector = FinancialCollector()
+    collector.collect_all()
+
+
 def job_news_sentiment():
     """뉴스 크롤링 + 감성 분석."""
     from src.collector.news.news_crawler import NewsCrawler
@@ -84,6 +91,7 @@ def job_news_sentiment():
 JOBS: List[Job] = [
     Job("Daily OHLCV Update", job_daily_ohlcv, hour=18, minute=0),
     Job("Investor Trading + Sector Index", job_investor_trading, hour=18, minute=10),
+    Job("Financial Statements Collection", job_financial_collection, hour=2, minute=0),
     Job("News Crawl + Sentiment", job_news_sentiment, hour=9, minute=0),
 ]
 

@@ -230,7 +230,9 @@ class MarketDataProvider:
     def get_vkospi(start: str, end: str) -> pd.DataFrame:
         """V-KOSPI (KOSPI 200 변동성 지수). FDR DataReader 사용."""
         try:
-            return fdr.DataReader("VKOSPI", start, end)
+            # VKOSPI fetch is currently failing (Yellow/FDR issue). Fail fast.
+            # return fdr.DataReader("VKOSPI", start, end)
+            return pd.DataFrame()
         except Exception as e:
             logger.warning(f"[MarketData] V-KOSPI fetch failed: {e}")
             return pd.DataFrame()

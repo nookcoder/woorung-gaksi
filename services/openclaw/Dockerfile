@@ -6,6 +6,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     git \
     python3 \
+    python3-pip \
+    python3-requests \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 

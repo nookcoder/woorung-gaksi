@@ -69,9 +69,12 @@ class FundamentalAgent:
         cb_overhang = financials.get("cb_overhang_pct", 0)
 
         # ─── 판정 ───
-        verdict = self._determine_verdict(f_score, relative_per, peg, dart_risks, cb_overhang)
+        data_available = financials.get("data_available", True)
 
-        summary = self._build_summary(f_score, verdict, relative_per, peg, dart_risks, cb_overhang)
+        # ─── 판정 ───
+        verdict = self._determine_verdict(f_score, relative_per, peg, dart_risks, cb_overhang, data_available)
+
+        summary = self._build_summary(f_score, verdict, relative_per, peg, dart_risks, cb_overhang, data_available)
 
         return FundamentalResult(
             ticker=ticker,
@@ -233,13 +236,20 @@ class FundamentalAgent:
 
     def _determine_verdict(
         self, f_score: int, rel_per: float, peg: float,
-        dart_risks: List[str], cb_overhang: float
+        dart_risks: List[str], cb_overhang: float,
+        data_available: bool = True
     ) -> FundamentalVerdict:
         """최종 Pass/Fail/Warning 판정."""
         # Hard Fail 조건
-        if f_score < 4:
-            return FundamentalVerdict.FAIL
         if dart_risks:
+            return FundamentalVerdict.FAIL
+            
+        # Missing Data Handling
+        if not data_available:
+            # 데이터가 없으면 FAIL 대신 WARNING 처리 (API 오류 등으로 인한 과도한 필터링 방지)
+            return FundamentalVerdict.WARNING
+
+        if f_score < 4:
             return FundamentalVerdict.FAIL
 
         # Warning 조건
@@ -260,9 +270,16 @@ class FundamentalAgent:
         return FundamentalVerdict.WARNING
 
     def _build_summary(
-        self, f_score, verdict, rel_per, peg, dart_risks, cb_overhang
+        self, f_score, verdict, rel_per, peg, dart_risks, cb_overhang, data_available=True
     ) -> str:
-        parts = [f"F-Score: {f_score}/9 → {verdict.value}"]
+        parts = []
+        if not data_available:
+            parts.append("⚠️ Missing Financials")
+        else:
+            parts.append(f"F-Score: {f_score}/9")
+            
+        parts.append(f"→ {verdict.value}")
+        
         if rel_per < 999:
             parts.append(f"Relative PER: {rel_per:.2f}")
         if peg < 999:

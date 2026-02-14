@@ -34,12 +34,16 @@ class DatabaseClient:
             if db_uri:
                 self._pool = psycopg2.pool.SimpleConnectionPool(min_conn, max_conn, dsn=db_uri)
             else:
-                user = os.getenv("POSTGRES_USER", "woorung")
-                password = os.getenv("POSTGRES_PASSWORD", "gaksi")
-                host = os.getenv("POSTGRES_HOST", "timescaledb")
-                port = os.getenv("POSTGRES_PORT", "5432")
-                dbname = os.getenv("POSTGRES_DB", "woorung_db")
-                
+                user = os.getenv("POSTGRES_USER")
+                password = os.getenv("POSTGRES_PASSWORD")
+                host = os.getenv("POSTGRES_HOST")
+                port = os.getenv("POSTGRES_PORT")
+                dbname = os.getenv("POSTGRES_DB")
+
+                if not all([user, password, host, port, dbname]):
+                    logger.error("[DatabaseClient] Missing DB environment variables.")
+                    raise ValueError("Missing DB environment variables")
+
                 self._pool = psycopg2.pool.ThreadedConnectionPool(
                     min_conn, max_conn,
                     user=user, password=password,

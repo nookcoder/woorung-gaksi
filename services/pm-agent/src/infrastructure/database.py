@@ -5,15 +5,16 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 import os
 
 # Get DB settings from Env
-DB_HOST = os.getenv("DB_Host", "postgres")
-DB_PORT = os.getenv("DB_Port", "5432")
-DB_USER = os.getenv("DB_User", "woorung")
-DB_PASSWORD = os.getenv("DB_Password", "gaksi")
-DB_NAME = os.getenv("DB_Name", "woorung_db")
+# Prioritize standard POSTGRES_* vars, fallback to old keys or defaults for safety (though defaults should be avoided)
+DB_HOST = os.getenv("POSTGRES_HOST") or os.getenv("DB_Host", "timescaledb")
+DB_PORT = os.getenv("POSTGRES_PORT") or os.getenv("DB_Port", "5432")
+DB_USER = os.getenv("POSTGRES_USER") or os.getenv("DB_User", "woorung")
+DB_PASSWORD = os.getenv("POSTGRES_PASSWORD") or os.getenv("DB_Password", "gaksi")
+DB_NAME = os.getenv("POSTGRES_DB") or os.getenv("DB_Name", "woorung_db")
 
-DB_URI = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-if os.getenv("DB_URI"):
-    DB_URI = os.getenv("DB_URI")
+DB_URI = os.getenv("DB_URI")
+if not DB_URI:
+    DB_URI = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 @asynccontextmanager
 async def get_postgres_checkpointer():

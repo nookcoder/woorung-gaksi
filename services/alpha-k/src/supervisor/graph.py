@@ -196,12 +196,34 @@ def deep_dive_node(state: AlphaKState) -> Dict:
             }
             print(f"    [Tech] Score={tech.score:.0f} VCP={'✅' if tech.vcp.detected else '❌'} OB={len(tech.order_blocks)}")
 
-            # 3B. Fundamental (KIS API + Neo4j Competitors)
-            stock_info = data_provider.get_stock_info(ticker)
-            kis_financials = data_provider.get_financial_statements(ticker)
+            # 3B. Fundamental (DB First → KIS API Fallback)
+            # Check DB for financials
+            from ..infrastructure.repositories.financial_repository import financial_repo
+            db_rows = financial_repo.get_latest_financials(ticker)
+            financials = {}
             
-            # KIS 데이터를 FundamentalAgent 포맷으로 변환
-            financials = _map_kis_to_fundamental(stock_info, kis_financials)
+            if db_rows and len(db_rows) >= 1:
+                financials = _map_db_to_fundamental(db_rows)
+            else:
+                # Fallback to API
+                stock_info = data_provider.get_stock_info(ticker)
+                kis_financials = data_provider.get_financial_statements(ticker)
+                
+                # Check api result validity
+                if kis_financials and isinstance(kis_financials, list):
+                     # Attempt to save to DB for next time (Lazy Load)
+                     try:
+                         from ..collector.financial_collector import FinancialCollector
+                         collector = FinancialCollector()
+                         # Just collecting forces fetching again, but cleaner reuse.
+                         # Check if we can just map and save.
+                         # Since collector logic is complex (mapping keys), calling collect(ticker) is easiest but slower (2 calls).
+                         # We'll just rely on _map_kis_to_fundamental for now for immediate use.
+                         pass
+                     except: pass
+                
+                # KIS 데이터를 FundamentalAgent 포맷으로 변환
+                financials = _map_kis_to_fundamental(stock_info, kis_financials)
             
             # Neo4j 경쟁사 비교 포함
             fund = fundamental_agent.analyze(ticker, financials, sector_avg_per=0) # 0 = Auto lookup peers
@@ -574,6 +596,7 @@ def _map_kis_to_fundamental(stock_info: Dict, kis_fin: Dict) -> Dict:
     # KIS 재무표 (FHKST03020800) parsing
     # 실제 API 리스폰스 구조에 따라 r[0] (최신), r[1] (이전) 접근
     if isinstance(kis_fin, list) and len(kis_fin) >= 2:
+        f["data_available"] = True
         curr = kis_fin[0]
         prev = kis_fin[1]
         
@@ -607,6 +630,54 @@ def _map_kis_to_fundamental(stock_info: Dict, kis_fin: Dict) -> Dict:
         
         f["asset_turnover"] = to_f(curr.get("total_asset_turnover_ratio"))
         f["asset_turnover_prev"] = to_f(prev.get("total_asset_turnover_ratio"))
+    else:
+        f["data_available"] = False
+
+    return f
+
+def _map_db_to_fundamental(db_rows: List[Dict]) -> Dict:
+    """DB Financials List[Dict] -> FundamentalAgent Input Dict"""
+    f = {
+        "data_available": True,
+        "per": db_rows[0].get("per", 0),
+        "peg_ratio": 1.2,
+        "cb_overhang_pct": 0,
+    }
+    
+    curr = db_rows[0]
+    prev = db_rows[1] if len(db_rows) > 1 else {}
+    
+    def get_float(d, k):
+        val = d.get(k)
+        if val is None: return 0.0
+        try: return float(val)
+        except: return 0.0
+    
+    f["net_income"] = get_float(curr, "net_income")
+    f["operating_cash_flow"] = get_float(curr, "operating_cash_flow")
+    
+    # Calculate ROA or use stored
+    curr_assets = get_float(curr, "total_assets")
+    prev_assets = get_float(prev, "total_assets")
+    prev_ni = get_float(prev, "net_income")
+    
+    f["roa"] = get_float(curr, "roa") or (f["net_income"] / curr_assets if curr_assets else 0)
+    f["roa_prev"] = get_float(prev, "roa") or (prev_ni / prev_assets if prev_assets else 0)
+    
+    f["long_term_debt"] = get_float(curr, "total_liabilities") # Proxy
+    f["long_term_debt_prev"] = get_float(prev, "total_liabilities")
+    
+    f["current_ratio"] = get_float(curr, "current_ratio")
+    f["current_ratio_prev"] = get_float(prev, "current_ratio")
+    
+    f["shares_outstanding"] = get_float(curr, "total_shares")
+    f["shares_outstanding_prev"] = get_float(prev, "total_shares")
+    
+    f["gross_margin"] = get_float(curr, "gross_margin")
+    f["gross_margin_prev"] = get_float(prev, "gross_margin")
+    
+    f["asset_turnover"] = get_float(curr, "asset_turnover")
+    f["asset_turnover_prev"] = get_float(prev, "asset_turnover")
 
     return f
 

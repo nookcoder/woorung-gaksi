@@ -17,10 +17,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from src.supervisor.graph import graph, risk_agent
-# Import individual nodes for direct analysis mode
 from src.supervisor.graph import (
     market_filter_node, deep_dive_node, scoring_node, trade_setup_node, report_node
 )
+from src.infrastructure.db.migrator import run_migrations
 
 # Configure logging
 logging.basicConfig(
@@ -33,6 +33,12 @@ logger = logging.getLogger("alpha-k-api")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """컨테이너 시작 시 스케줄러를 백그라운드로 실행."""
+    # Run DB Migrations
+    try:
+        run_migrations()
+    except Exception as e:
+        logger.error(f"Migration failed: {e}")
+
     from src.scheduler import run_scheduler
     scheduler_task = asyncio.create_task(run_scheduler())
     logger.info("[Lifespan] Scheduler started")

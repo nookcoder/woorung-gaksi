@@ -19,7 +19,14 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL}
       - MODEL_NAME=${MODEL_NAME}
       - TAVILY_API_KEY=${TAVILY_API_KEY}
-      - DB_URI=postgresql://woorung:gaksi@timescaledb:5432/woorung_db
+      # Database Connection
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      # Keep legacy DB_URI compatible or change code (We will change code)
+      # - DB_URI=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -54,11 +61,20 @@ services:
       - KIS_APP_SECRET=${KIS_APP_SECRET}
       - KIS_ACCOUNT_NO=${KIS_ACCOUNT_NO}
       - OPENDART_API_KEY=${OPENDART_API_KEY}
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
       - DEEPSEEK_API_KEY=${OPENAI_API_KEY}
-      - NEO4J_URI=bolt://neo4j:7687
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=woorung1234
+      # Database Connection
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      # Extra Services
+      - ELASTICSEARCH_URL=${ELASTICSEARCH_URL}
+      - NEO4J_URI=${NEO4J_URI}
+      - NEO4J_USER=${NEO4J_USER}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -125,9 +141,9 @@ services:
     container_name: woorung-timescaledb
     restart: always
     environment:
-      POSTGRES_USER: woorung
-      POSTGRES_PASSWORD: gaksi
-      POSTGRES_DB: woorung_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
       TS_TUNE_MEMORY: "2GB" # Optimize for Mac mini (8GB/16GB)
       POSTGRES_HOST_AUTH_METHOD: trust
     ports:
@@ -137,7 +153,7 @@ services:
     networks:
       - woorung-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U woorung -d woorung_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -184,7 +200,7 @@ services:
     image: neo4j:5.16.0
     container_name: woorung-neo4j
     environment:
-      - NEO4J_AUTH=neo4j/woorung1234
+      - NEO4J_AUTH=${NEO4J_USER}/${NEO4J_PASSWORD}
       - NEO4J_dbms_memory_heap_initial__size=512m
       - NEO4J_dbms_memory_heap_max__size=1G
     ports:
@@ -207,7 +223,48 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    mem_limit: 1.5g
+  # -------------------------------------------------------------
+  # Dashboards (Adminer, Redis Commander, Kibana)
+  # -------------------------------------------------------------
+
+  adminer:
+    image: adminer
+    container_name: woorung-adminer
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      - ADMINER_DEFAULT_SERVER=timescaledb
+    networks:
+      - woorung-net
+    depends_on:
+      - timescaledb
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: woorung-redis-commander
+    restart: always
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    ports:
+      - "8081:8081"
+    networks:
+      - woorung-net
+    depends_on:
+      - redis
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.12.0
+    container_name: woorung-kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks:
+      - woorung-net
+    depends_on:
+      - elasticsearch
+    mem_limit: 1g
 
 networks:
   woorung-net:
