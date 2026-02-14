@@ -1,3 +1,8 @@
+---
+name: alpha-k
+description: Stock trading advisor using Alpha-K expert system. Use for stock recommendations, market analysis, sector trends, or analysis of specific stocks.
+---
+
 # Alpha-K Stock Advisor
 
 This skill enables the agent to act as a professional stock trading advisor using the Alpha-K expert system.

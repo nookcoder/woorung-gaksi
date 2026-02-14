@@ -99,7 +99,7 @@ services:
       - "18789:18789"
     volumes:
       - ./services/openclaw/state:/home/openclaw/.openclaw/state
-      - ./services/openclaw/skills:/home/openclaw/.openclaw/skills
+      - ./services/openclaw/skills:/home/openclaw/.openclaw/.openclaw/workspace/skills
       - ./services/openclaw/openclaw.json:/home/openclaw/.openclaw/openclaw.json
     environment:
       - OPENCLAW_HOME=/home/openclaw/.openclaw

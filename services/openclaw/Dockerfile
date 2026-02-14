@@ -21,8 +21,11 @@ ENV NPM_CONFIG_PREFIX=/home/openclaw/.npm-global
 ENV PATH=$PATH:/home/openclaw/.npm-global/bin
 RUN npm install -g openclaw@latest
 
-# Prepare OpenClaw home and state directories
-RUN mkdir -p /home/openclaw/.openclaw/skills /home/openclaw/.openclaw/state
+# Prepare OpenClaw home, state, and workspace directories
+RUN mkdir -p /home/openclaw/.openclaw/state /home/openclaw/.openclaw/.openclaw/workspace/skills
+
+# Copy custom skills (alpha-k, pm-agent) into openclaw workspace skills directory
+COPY --chown=openclaw:openclaw skills/ /home/openclaw/.openclaw/.openclaw/workspace/skills/
 
 # Environment variables for OpenClaw (can be overridden by docker-compose)
 ENV OPENCLAW_HOME=/home/openclaw/.openclaw

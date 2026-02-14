@@ -1,3 +1,8 @@
+---
+name: pm-agent
+description: Project manager agent for general tasks, project management, and complex planning.
+---
+
 # PM Agent (Project Manager)
 
 This skill allows the agent to handle general tasks, project management, and complex planning using the Woorung-Gaksi PM Agent.
